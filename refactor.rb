@@ -56,10 +56,31 @@ class String
     end
     def balanced?(chars)
         # This is simpleminded, but will do for a start.
-        count(chars).even?
+        chars = chars.split(//)
+        opens, chars = chars.partition { |ch| ['[','{','(','<'].include? ch }
+        closes,chars = chars.partition { |ch| [']','}',')','>'].include? ch }
+        count(chars.join).even? and count(opens.join)-count(closes.join) == 0
     end
     def balanced_quotes?
         balanced?('"') and balanced?("'")
+    end
+end
+
+module Git
+    def self.tracked_files 
+        @tracked_files ||= `git ls-files`.
+          split("\n").
+          collect { |l| l.chomp}.
+          grep(/\.rb$/)
+    end
+    def self.commit(msg,&block)
+        yield
+        File.open('refactor_msg.mqr','w') { |f| f.print msg }
+        `git commit -a --file refactor_msg.mqr`
+        File.delete 'refactor_msg.mqr'
+    end
+    def self.modified_files
+        `git status`.scan(/^#\s*modified:\s*(.*)/).flatten
     end
 end
 
@@ -118,11 +139,28 @@ class A_replacement < A_container
         new_version = @conditions.all? { |cond| cond.call(*captures) } ? @replacement.call(*captures) : match
         if new_version != match
             @count += 1
-            examples_wanted = examples_to_show || 3
-            @examples << [match,new_version,match_data] if @examples.length < examples_wanted or rand(100) == 0
-            @examples.delete_at(rand(@examples.length)) if @examples.length > examples_wanted
+            note_possible_example(match,new_version,match_data)
         end
         new_version
+    end
+    def note_possible_example(*data)
+        examples_wanted = examples_to_show || 3
+        @examples << stash_example(*data) if @examples.length < examples_wanted or rand(100) == 0
+        @examples.delete_at(rand(@examples.length)) if @examples.length > examples_wanted
+    end
+    def stash_example(*data)
+        data
+    end
+    def format_example(data)
+        old,new,match_data = *data
+        pre  = @context_before ? [match_data.pre_match. as_lines[-@context_before..-1]].flatten.compact.join("\n") : ''
+        post = @context_after  ? [match_data.post_match.as_lines[0...@context_after  ]].flatten.compact.join("\n") : ''
+        [
+        "The code:",
+        (pre+old+post).reindented(4),
+        "\nbecomes:",
+        (pre+new+post).reindented(4)
+        ].join("\n")
     end
     def replace_in(text)
         changes = nil
@@ -146,29 +184,33 @@ class A_replacement < A_container
         @count,@examples = 0,[]
         result
     end
-    def format_example(old,new,match_data)
-        pre  = @context_before ? [match_data.pre_match. as_lines[-@context_before..-1]].flatten.compact.join("\n") : ''
-        post = @context_after  ? [match_data.post_match.as_lines[0...@context_after  ]].flatten.compact.join("\n") : ''
-        [
-        "The code:",
-        (pre+old+post).reindented(4),
-        "\nbecomes:",
-        (pre+new+post).reindented(4)
-        ].join("\n")
+    def __(n,foos,foo=foos.sub(/s$/,''))
+        case n
+        when 0; "no #{foos}"
+        when 1; "1 #{foo}"
+        else    "#{n} #{foos}"
+        end
+    end
+    def compact_if_possible(*lines)
+        return lines if lines.any? { |line| line =~ /\n/ }
+        one_liner = lines.join.sub(/ +/,' ')
+        (one_liner.length < 60) ? one_liner : lines
     end
     def to_s
         [
             title,
-            (description||'').remove_leading_and_trailing_blank_lines.deindented,
-            "Replaced #{(@count > 0) ? @count : 'no'} occurance#{(@count == 1) ? '' : 's'} of",
-            @pattern_description.reindented(4),
-            @replacement_description ? 
-                ["with",@replacement_description.reindented(4)] :
-                'with a computed value',
-            (rational||'').remove_leading_and_trailing_blank_lines.deindented,
-            ("Example#{(@examples.length > 2) ? 's':''}:" unless @examples.empty?),
-            @examples.collect { |e| format_example(*e) }.join("\n- - - - - - - -\n").indented(4,:including_first),
-            (["#{@skipped_files.length} files were skipped.",@skipped_files.join("\n").reindented(4)] unless @skipped_files.empty?)
+            (description.remove_leading_and_trailing_blank_lines.deindented if description),
+            compact_if_possible(
+                "Replaced #{__(@count,'occurances')} of",
+                @pattern_description.reindented(4),
+                @replacement_description ? 
+                    ["with",@replacement_description.reindented(4)] :
+                    'with a computed value'
+            ),
+            (rational.remove_leading_and_trailing_blank_lines.deindented if rational),
+            ("#{__(@examples.length,'Examples')}:" unless @examples.empty?),
+            @examples.collect { |e| format_example(e) }.join("\n- - - - - - - -\n").indented(4,:including_first),
+            (["#{__(@skipped_files.length,'files were','file was')} skipped.",@skipped_files.join("\n").reindented(4)] unless @skipped_files.empty?)
         ].flatten.compact.join("\n\n").gsub(/\n\n+/,"\n\n")
     end
 end
@@ -178,7 +220,21 @@ class A_line_replacement < A_replacement
 #        text.as_lines.collect { |line| line.sub(@pat) { |match| replace_function(match,Regexp.last_match)}}.join("\n")
 #    end
     def replace_in(text)
-        text.gsub(@pat) { |match| replace_function(match,Regexp.last_match) }
+        result = text.gsub(@pat) { |match| replace_function(match,Regexp.last_match) }
+        @examples = @examples.collect { |e|
+            (e.length == 2) ? e : (           
+                start = e.last.pre_match.as_lines.length - (@context_before || 0)
+                start = 0 if start < 0
+                len = (@context_before || 0) + 1 + (@context_after || 0)
+                #p [start,len,result.length,result.as_lines.length,text.length,text.as_lines.length]
+                [text.as_lines[start,len].join("\n"),result.as_lines[start,len].join("\n")] 
+                )
+        }
+        result
+    end
+    def format_example(data)
+        old,new = *data
+        ["The code:",old.reindented(4),"becomes:",new.reindented(4)].join("\n")
     end
 end
 
@@ -219,7 +275,11 @@ class A_term_replacement < A_replacement
     end
     def like(s,desc=nil)
         s = s.source if s.is_a? Regexp
-        super /\b#{s}\b/,(desc || s)
+        if s =~ /\w.*\w/
+            super /\b#{s}\b/,(desc || s)
+        else
+            super /#{s}/,(desc || s)
+        end
     end
 end
 
@@ -249,34 +309,35 @@ class A_commit
     def replace_methods(*args,&block)
         @refactors << A_method_replacement.new(*args,&block)
     end
-    def tracked_files 
-        @tracked_files ||= `git ls-files`.
-          split("\n").
-          collect { |l| l.chomp}.
-          grep(/\.rb$/)
-    end
     def excluded_files
         ["lib/puppet/parser/parser.rb"]
     end
     def files
-        tracked_files - excluded_files
+        Git.tracked_files - excluded_files
     end
     def to_s
-        "Code smell: #{msg.strip}\n#{refactors.join("\n#{'-'*50}\n")}\n"
+        if refactors.length == 1
+            "Code smell: #{msg.strip}\n#{refactors}\n"
+        else
+            "Code smell: #{msg.strip}\n#{refactors.collect { |r| "* "+r.to_s.indented(2)}.join("\n#{'-'*50}\n")}\n"
+        end
     end
     def do_it
         return puts("Skipping #{msg}") if @skip
         puts msg
         abort unless refactors.all? { |r| r.passes_tests? }
         #refactors.each { |r| puts '    ',r.to_s }
+        unless Git.modified_files.empty?
+            puts "The following files have been modifiied\n    #{iGit.modified_files.join("\n    ")}\nPlease commit or revert and then try again."
+            abort
+        end
         # object if there are uncommitted changes
-        files.each { |file|
-            text = refactors.inject(File.read(file)) { |text,refactor| refactor.apply_to(file,text) }
-            File.open(file,'w') { |f| f.print text }
+        Git.commit(self) {
+            files.each { |file|
+                text = refactors.inject(File.read(file)) { |text,refactor| refactor.apply_to(file,text) }
+                File.open(file,'w') { |f| f.print text }
+            }
         }
-        File.open('refactor_msg.mqr','w') { |f| f.print self }
-        `git commit -a --file refactor_msg.mqr`
-        File.delete 'refactor_msg.mqr'
     end
     def skip!
         @skip = true
@@ -287,18 +348,14 @@ def commit(*args,&block)
     A_commit.new(*args,&block).do_it
 end
 
-unless (modified_files = `git status`.scan(/^#\s*modified:\s*(.*)/).flatten).empty?
-    puts "The following files have been modifiied\n    #{modified_files.join("\n    ")}\nPlease commit or revert and then try again."
-    abort
-end
-
 #-------------------------------------------------------------------------------------------------------------------------------------
-
-commit "Inconsistant indentation" do
+Line_length_limit = 160
+commit "Inconsistant indentation and related formatting issues" do
     replace_lines {
         like /^(.*?) +$/
         with '\1'
         title "Eliminate trailing spaces."
+        examples_to_show 0
     }
     replace_lines {
         like /^(\t+)(.*)/
@@ -311,33 +368,73 @@ commit "Inconsistant indentation" do
             "\ta tab"    => "        a tab"
         })
     }
+    replace_consecutive_lines {
+        like %q{
+            (.*)(['"]) *[+]
+             *(['"])(.*)
+        }
+        with '\1\2'
+        provided { |indent,first,q1,q2,second| 
+            (first+q1).balanced_quotes? and (q2+second).balanced_quotes? and 
+            (indent+first+second).length < Line_length_limit
+        }
+        title "Don't use string concatenation to split lines unless they would be very long."
+    }    
+    replace_consecutive_lines {
+        like %q{
+            (.*['"] *%)
+             +(.*)
+        }
+        with '\1 \2'
+        provided { |indent,first,second| 
+            first.balanced_quotes? and second.balanced_quotes? and 
+            (indent+first+second).length < Line_length_limit and
+            !first.balanced?('[]()') and (first+second).balanced?('[]()')
+        }
+        title "Don't arbitrarily wrap on sprintf (%) operator."
+        rational "Splitting the line does nothing to aid clarity and hinders further refactorings."
+    }    
+    replace_consecutive_lines {
+        like %q{
+            (.*)
+             +(.*)
+        }
+        with '\1\2'
+        provided { |indent,first,second| 
+            first.balanced_quotes? and second.balanced_quotes? and 
+            (indent+first+second).length < Line_length_limit and
+            (first.count('([{') > first.count(')]}')) and (first+second).balanced?('[](){}')
+        }
+        title "Don't break short arrays/parameter list in two."
+    }    
     replace_lines {
         like /^( *)(.*)/
         with { |indent,content|
-            @current_line_number += 1
             if content.empty?
                 ''
             else
-                pause = false
                 i = indent.length
                 @adjustments.pop while i < @adjustments.last[0]
                 d = @adjustments.last[1]
-                if (delta=i+d-@prior_result.indentation)>4 and content[0,1] == "#"
+                delta=i+d-@prior_result.indentation
+                if delta>4 and content[0,1] == "#"
                     d -= delta
                     content[1,0] = ' '*delta
+                elsif delta>4 and ['[','(','{'].include? @prior_result[-1,1]
+                    d -= delta-4
+                #elsif delta > 4
+                #    d -= delta-4
                 else
                     case (i+d) % 4
                     when 0: d =d
                     when 1: d-=1
                     when 2:
                         if delta == -2
-                            if content =~ /^(else|elsif|when|end)/
+                            if content =~ /^(else|elsif|rescue|ensure|end|\)|\]|\})/
                                 d-=2
                             else
                                 d+=2
                             end
-                            pause = true
-                            #puts "exdent finagle"
                         else
                             d+=2
                             @adjustments.push [i,d]
@@ -345,8 +442,6 @@ commit "Inconsistant indentation" do
                     when 3: d+=1   
                     end
                 end
-                #print "#{'%3i %3i:' %[i,d]}:#{' '*(i+d)}#{content}"
-                #if d != 0 and pause then readline else puts end
                 @prior_result = (' '*(i+d))+content
             end
         }
@@ -355,19 +450,12 @@ commit "Inconsistant indentation" do
             to maintain that standard.  These should be fixed regardless of the 2 vs. 4 space question.
             "
         skip_files_where { |file_name,text| 
-            @all_indentations = text.indentations
-            @current_line_number = 0
-            last = 0
-            @indentation_deltas = @all_indentations.collect { |i| delta = i-last; last = i; delta }
             @adjustments = [[0,0]]
             @prior_result = ''
-            case
-            when @all_indentations.all?   { |i| i % 4 == 0 }; ''
-            #when (@indentation_deltas - [-2,0,2]).empty?;     "it's already two-space indented"
-            else nil
-            end
+            text.indentations.all? { |i| i % 4 == 0 } ?  '' : nil
         }
-        context 3
+        context 5
+        examples_to_show 15
     }
 end
 
@@ -386,6 +474,13 @@ commit "English names for special globals rather than line-noise" do
     replace_terms { like '[$]:';   with '$LOAD_PATH';        }
     replace_terms { like '[$]!';   with '$ERROR_INFO';       }
     replace_terms { like '[$]"';   with '$LOADED_FEATURES';  }
+end
+
+commit "Use string interpolation" do
+    replace_terms {
+        like '" *[+] ([$@]?[\w_0-9]+)(.to_s\b)?'
+        with '#{\1}"'
+    }
 end
 
 commit "Line modifiers are preferred to one-line blocks." do
@@ -408,7 +503,7 @@ commit "Line modifiers are preferred to one-line blocks." do
         provided { |indent,condition,body|
             condition !~ /\w+ *@?\w+ *=/           and
             body !~ / (if|unless|while|unil) /    and 
-            (indent+condition+body).length < 120
+            (indent+condition+body).length < Line_length_limit
         }
         rational "
             The one-line form is preferable provided:
@@ -434,7 +529,7 @@ commit "Booleans are first class values." do
                 \2 false
             end
         }
-        with '\2 \1'
+        with '\2 !!\1'
     }
 end
 
@@ -478,7 +573,7 @@ end
 
 commit "Omit needless checks on defined" do
     replace_terms {
-        like /defined? +([@a-zA-Z_.0-9?=]+)/
+        like /defined\? +([@a-zA-Z_.0-9?=]+)/
         with 'defined?(\1)'
         rational 'This makes detecting subsequent patterns easier.'
     }
@@ -557,7 +652,7 @@ commit "Two space indentation" do
         skip_files_where { |file_name,text| 
             bad_indents = text.indentations.select { |indent| indent %4 != 0 }
             "it has lines with unexpected indentation (#{bad_indents.join(",")})" unless bad_indents.empty?
-            }
+        }
     }
 end
 
