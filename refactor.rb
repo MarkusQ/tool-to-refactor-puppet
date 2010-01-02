@@ -158,7 +158,7 @@ class A_replacement < A_container
         [
         "The code:",
         (pre+old+post).reindented(4),
-        "\nbecomes:",
+        "becomes:",
         (pre+new+post).reindented(4)
         ].join("\n")
     end
@@ -192,9 +192,8 @@ class A_replacement < A_container
         end
     end
     def compact_if_possible(*lines)
-        return lines if lines.any? { |line| line =~ /\n/ }
-        one_liner = lines.join.sub(/ +/,' ')
-        (one_liner.length < 60) ? one_liner : lines
+        one_liner = lines.flatten.collect {|line| line.strip}.join(' ').gsub(/ +/,' ')
+        (one_liner.length > 60 or one_liner =~ /\n/) ? lines : one_liner
     end
     def to_s
         [
@@ -209,7 +208,7 @@ class A_replacement < A_container
             ),
             (rational.remove_leading_and_trailing_blank_lines.deindented if rational),
             ("#{__(@examples.length,'Examples')}:" unless @examples.empty?),
-            @examples.collect { |e| format_example(e) }.join("\n- - - - - - - -\n").indented(4,:including_first),
+            @examples.collect { |e| format_example(e) }.join("\n").indented(4,:including_first),
             (["#{__(@skipped_files.length,'files were','file was')} skipped.",@skipped_files.join("\n").reindented(4)] unless @skipped_files.empty?)
         ].flatten.compact.join("\n\n").gsub(/\n\n+/,"\n\n")
     end
@@ -275,7 +274,7 @@ class A_term_replacement < A_replacement
     end
     def like(s,desc=nil)
         s = s.source if s.is_a? Regexp
-        if s =~ /\w.*\w/
+        if s =~ /^\w.*\w$/
             super /\b#{s}\b/,(desc || s)
         else
             super /#{s}/,(desc || s)
@@ -317,9 +316,9 @@ class A_commit
     end
     def to_s
         if refactors.length == 1
-            "Code smell: #{msg.strip}\n#{refactors}\n"
+            "Code smell: #{msg.strip}\n\n#{refactors}\n"
         else
-            "Code smell: #{msg.strip}\n#{refactors.collect { |r| "* "+r.to_s.indented(2)}.join("\n#{'-'*50}\n")}\n"
+            "Code smell: #{msg.strip}\n\n#{refactors.collect { |r| "* "+r.to_s.indented(2)}.join("\n\n")}\n"
         end
     end
     def do_it
@@ -370,57 +369,60 @@ commit "Inconsistant indentation and related formatting issues" do
     }
     replace_consecutive_lines {
         like %q{
-            (.*)(['"]) *[+]
-             *(['"])(.*)
-        }
-        with '\1\2'
-        provided { |indent,first,q1,q2,second| 
-            (first+q1).balanced_quotes? and (q2+second).balanced_quotes? and 
-            (indent+first+second).length < Line_length_limit
-        }
-        title "Don't use string concatenation to split lines unless they would be very long."
-    }    
-    replace_consecutive_lines {
-        like %q{
             (.*['"] *%)
              +(.*)
         }
         with '\1 \2'
         provided { |indent,first,second| 
             first.balanced_quotes? and second.balanced_quotes? and 
-            (indent+first+second).length < Line_length_limit and
-            !first.balanced?('[]()') and (first+second).balanced?('[]()')
+            (indent+first+second).length < Line_length_limit
         }
         title "Don't arbitrarily wrap on sprintf (%) operator."
         rational "Splitting the line does nothing to aid clarity and hinders further refactorings."
+        # WTF?
+        #          The code:
+        #              msg += "triggered run" %
+        #              if options[:tags]
+        #          becomes:
+        #              msg += "triggered run" % if options[:tags]                                                             
     }    
     replace_consecutive_lines {
         like %q{
             (.*)
              +(.*)
         }
-        with '\1\2'
+        with '\1 \2'
         provided { |indent,first,second| 
             first.balanced_quotes? and second.balanced_quotes? and 
             (indent+first+second).length < Line_length_limit and
             (first.count('([{') > first.count(')]}')) and (first+second).balanced?('[](){}')
         }
         title "Don't break short arrays/parameter list in two."
-    }    
+    }
+    replace_consecutive_lines {
+        like '\(([^)]*(\([^)]*\))?),$'
+        with %q{
+            (
+                \2,
+        }
+        title "If arguments must wrap, treat them all equally"
+    }
     replace_lines {
         like /^( *)(.*)/
         with { |indent,content|
+            i = indent.length
             if content.empty?
                 ''
+            elsif i == @prior_i
+                @prior_result = ' '*@prior_result.indentation+content
             else
-                i = indent.length
                 @adjustments.pop while i < @adjustments.last[0]
                 d = @adjustments.last[1]
-                delta=i+d-@prior_result.indentation
+                delta = i+d-@prior_result.indentation
                 if delta>4 and content[0,1] == "#"
                     d -= delta
                     content[1,0] = ' '*delta
-                elsif delta>4 and ['[','(','{'].include? @prior_result[-1,1]
+                elsif delta>4 or ['[','(','{'].include? @prior_result[-1,1]
                     d -= delta-4
                 #elsif delta > 4
                 #    d -= delta-4
@@ -442,7 +444,8 @@ commit "Inconsistant indentation and related formatting issues" do
                     when 3: d+=1   
                     end
                 end
-                @prior_result = (' '*(i+d))+content
+                @prior_i = i
+                @prior_result = ' '*(i+d)+content
             end
         }
         rational "
@@ -451,6 +454,7 @@ commit "Inconsistant indentation and related formatting issues" do
             "
         skip_files_where { |file_name,text| 
             @adjustments = [[0,0]]
+            @prior_i = 0
             @prior_result = ''
             text.indentations.all? { |i| i % 4 == 0 } ?  '' : nil
         }
@@ -463,7 +467,7 @@ commit "Use {} for % notation delimiters wherever practical" do
     replace_terms { like '%([qQrwWx])\((.*?)\)';     with '%\1{\2}'; provided { |char,      body| !body.include?('}')} }
     replace_terms { like '%([qQrwWx])\[(.*?)\]';     with '%\1{\2}'; provided { |char,      body| !body.include?('}')} }
     replace_terms { like '%([qQrwWx])<(.*?)>';       with '%\1{\2}'; provided { |char,      body| !body.include?('}')} }
-    replace_terms { like '%([qQrwWx])([^{])(.*?)\2'; with '%\1{\3}'; provided { |char,delim,body| !body.include?('}')} }
+    replace_terms { like '%([qQrwWx])([^{])(.*?)\2'; with '%\1{\3}'; provided { |char,delim,body| !body.include?('}')}; tests('%r!foo$!' => '%r{foo$}') }
     # Boo hoo:  at.files_matching %r!spec/(unit|integration)/#{m[1]}.rb!
 end
 
@@ -474,6 +478,16 @@ commit "English names for special globals rather than line-noise" do
     replace_terms { like '[$]:';   with '$LOAD_PATH';        }
     replace_terms { like '[$]!';   with '$ERROR_INFO';       }
     replace_terms { like '[$]"';   with '$LOADED_FEATURES';  }
+    %q{
+          The code:
+              { :acl => "~ ^\/catalog\/([^\/]+)$", :method => :find, :allow => '$1', :authenticated => true },
+          becomes:
+              { :acl => "~ ^\/catalog\/([^\/]+)$LOADED_FEATURES, :method => :find, :allow => '$1', :authenticated => true },
+          The code:
+              lambda { @right.newright("~ .rb$")}.should_not raise_error
+          becomes:
+              lambda { @right.newright("~ .rb$LOADED_FEATURES)}.should_not raise_error
+    }
 end
 
 commit "Use string interpolation" do
@@ -481,6 +495,20 @@ commit "Use string interpolation" do
         like '" *[+] ([$@]?[\w_0-9]+)(.to_s\b)?'
         with '#{\1}"'
     }
+    replace_consecutive_lines {
+        like %q{
+            (.*)(['"]) *[+]
+             *(['"])(.*)
+        }
+        with '\1\4'
+        provided { |indent,first,q1,q2,second| 
+            (first+q1).balanced_quotes? and 
+            (q2+second).balanced_quotes? and
+            q1 == q2 and
+            (indent+first+second).length < Line_length_limit
+        }
+        title "Don't use string concatenation to split lines unless they would be very long."
+    }    
 end
 
 commit "Line modifiers are preferred to one-line blocks." do
@@ -524,12 +552,13 @@ commit "Booleans are first class values." do
     replace_consecutive_lines {
         like %q{
             if (.*)
-                (.*) true
+                (.*) (true|\1)
             else
-                \2 false
+                \2 (false|nil)
             end
         }
-        with '\2 !!\1'
+        #with '\2 !!(\1)'
+        with '\2 \1'
     }
 end
 
@@ -656,24 +685,31 @@ commit "Two space indentation" do
     }
 end
 
-__END__
-
 commit "Avoid needless decorations" do
-    refactor_terms {
-        like /self\.([a-z_]+)]/
+    replace_terms {
+        like /self\.([a-z_]+)(?! *[-&|+*]*=)/
         with '\1'
-        provided { |method| method != class }
+        provided { |method| method != 'class' }
+        tests(
+            "self.xyz"      => "xyz",
+            "self.class"    => 'self.class',
+            'self.x += 7'   => 'self.x += 7',
+            'def self.foo'  => 'def self.foo'
+        )
     }
-    refactor_terms {
+    replace_terms {
         like /([a-z_]+)\(\)/
         with '\1'
         #proc() -> proc
+        # but beware things like 'foo = foo()'!
     }
-    refactor_lines {
+    replace_lines {
         like /^(. *)end *#.*/
-        with '\1end
-    }'
-}
+        with '\1end'
+    }
+end
+
+__END__
 
 error handling
 preserve stack traces
