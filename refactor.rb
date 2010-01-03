@@ -107,6 +107,12 @@ class A_replacement < A_container
         @skipped_files = []
         super(*args,&block)
     end
+    def skip!(*args)
+        @skip = args
+    end
+    def skip?
+        @skip
+    end
     def like(s,desc=nil)
         fail "Can't have more than one pattern" if @pat
         s = /#{s.remove_leading_and_trailing_blank_lines.deindented}/ unless s.is_a? Regexp
@@ -180,7 +186,10 @@ class A_replacement < A_container
         end
     end
     def passes_tests?
-        result = (tests || {}).all? { |a,b| (c = apply_to('test',a.dup)) == b || (puts "#{title} fails tests; expected #{a.inspect} to become #{b.inspect} but got #{c.inspect}") }
+        result = (tests || {}).all? { |a,b|
+            c = apply_to('test',a.dup)
+            c == b || (c==a && b==:unchanged) || (puts "#{title} fails tests; expected #{a.inspect} to become #{b.inspect} but got #{c.inspect}") 
+        }
         @count,@examples = 0,[]
         result
     end
@@ -286,10 +295,38 @@ class A_method_replacement < A_consecutive_line_replacement
     # fills in patterns for (METHOD_HEADER), (LINES), etc.
 end
 
+class A_targeted_replacement
+    def initialize(*args)
+        @changes = args.pop
+        @files = args
+        @desc = Hash.new(0)
+    end
+    def skip!(*args)
+        @skip = args
+    end
+    def skip?
+        @skip
+    end
+    def passes_tests?
+        true
+    end
+    def apply_to(file_name,text)
+        @changes.each { |old,new| text.gsub!(old) { @desc[[file_name,old,new]] += 1;new}} if @files.include? file_name
+        text
+    end
+    def to_s
+        @desc.collect { |x| 
+            file,old,new,n = *x.flatten
+            "Changed #{old.inspect} to #{new.inspect} in #{file}#{" #{n} times." if n > 1}"
+        }.join("\n* ")
+    end
+end
+
 class A_commit
     attr_reader :refactors,:msg
     def initialize(msg,*args,&block)
         @refactors = []
+        @validations = []
         @msg = msg
         instance_eval &block
     end
@@ -308,10 +345,14 @@ class A_commit
     def replace_methods(*args,&block)
         @refactors << A_method_replacement.new(*args,&block)
     end
+    def replace_in(*args)
+        @refactors << A_targeted_replacement.new(*args)
+    end
     def excluded_files
         ["lib/puppet/parser/parser.rb"]
     end
     def files
+        fail unless excluded_files.all? { |f| Git.tracked_files.include? f }
         Git.tracked_files - excluded_files
     end
     def to_s
@@ -324,22 +365,37 @@ class A_commit
     def do_it
         return puts("Skipping #{msg}") if @skip
         puts msg
+        refactors.reject! { |r| r.skip? }
         abort unless refactors.all? { |r| r.passes_tests? }
         #refactors.each { |r| puts '    ',r.to_s }
         unless Git.modified_files.empty?
-            puts "The following files have been modifiied\n    #{iGit.modified_files.join("\n    ")}\nPlease commit or revert and then try again."
+            puts "The following files have been modifiied\n    #{Git.modified_files.join("\n    ")}\nPlease commit or revert and then try again."
             abort
         end
         # object if there are uncommitted changes
         Git.commit(self) {
             files.each { |file|
-                text = refactors.inject(File.read(file)) { |text,refactor| refactor.apply_to(file,text) }
+                text = refactors.inject(File.read(file)) { |text,refactor| 
+                    # puts "#{file} #{refactor.title || refactor.pattern_description}"; 
+                    refactor.apply_to(file,text) 
+                    }
                 File.open(file,'w') { |f| f.print text }
+                unless @validations.all? { |v| v.call }
+                    print "Changing #{file} broke it."
+                    abort
+                end
             }
+        if false
+            `rake spec &> rfrs.out`
+            puts File.readlines('rfrs.out').last
+        end
         }
     end
-    def skip!
+    def skip!(*args)
         @skip = true
+    end
+    def validate_each_file(&block)
+        @validations << block
     end
 end
 
@@ -349,7 +405,17 @@ end
 
 #-------------------------------------------------------------------------------------------------------------------------------------
 Line_length_limit = 160
-commit "Inconsistant indentation and related formatting issues" do
+commit "Miscellaneous oddity removal" do
+    replace_in "lib/puppet/external/pson/pure/parser.rb",
+        'string = self[1].gsub(%r((?:\\\\[\\\\bfnrt"/]|(?:\\\\u(?:[A-Fa-f\\d]{4}))+|\\\\[\x20-\\xff]))n) do |c|' =>
+        'string = self[1].gsub(%r{(?:\\\\[\\\\bfnrt"/]|(?:\\\\u(?:[A-Fa-f\\d]{4}))+|\\\\[\x20-\\xff])}n) do |c|'
+    replace_in "lib/puppet/agent/runner.rb",
+        '"triggered run" %' => '"triggered run"' #Don't try to sprintf into strings with no %-parameters.
+    replace_in "lib/puppet/parser/parser_support.rb","lib/puppet/provider/augeas/augeas.rb",
+        '"$"' => "'$'"
+end
+
+commit "Inconsistent indentation and related formatting issues" do
     replace_lines {
         like /^(.*?) +$/
         with '\1'
@@ -379,12 +445,6 @@ commit "Inconsistant indentation and related formatting issues" do
         }
         title "Don't arbitrarily wrap on sprintf (%) operator."
         rational "Splitting the line does nothing to aid clarity and hinders further refactorings."
-        # WTF?
-        #          The code:
-        #              msg += "triggered run" %
-        #              if options[:tags]
-        #          becomes:
-        #              msg += "triggered run" % if options[:tags]                                                             
     }    
     replace_consecutive_lines {
         like %q{
@@ -395,15 +455,22 @@ commit "Inconsistant indentation and related formatting issues" do
         provided { |indent,first,second| 
             first.balanced_quotes? and second.balanced_quotes? and 
             (indent+first+second).length < Line_length_limit and
-            (first.count('([{') > first.count(')]}')) and (first+second).balanced?('[](){}')
+            (first.gsub(/\\./,'').count('([{') > first.gsub(/\\./,'').count(')]}')) and (first+second).balanced?('[](){}') and
+            first !~ /"\["/
         }
         title "Don't break short arrays/parameter list in two."
+        tests(
+            %q{
+                OPEN = /\(/
+                CLOSE = /\)/
+            } => :unchanged
+        )
     }
-    replace_consecutive_lines {
-        like '\(([^)]*(\([^)]*\))?),$'
+    replace_lines {
+        like '(.*\()([^)]*(\([^)]*\))?,)$','lines ending in things like ...(foo, or ...(bar(1,3),'
         with %q{
-            (
-                \2,
+            \1
+                \2
         }
         title "If arguments must wrap, treat them all equally"
     }
@@ -419,7 +486,7 @@ commit "Inconsistant indentation and related formatting issues" do
                 @adjustments.pop while i < @adjustments.last[0]
                 d = @adjustments.last[1]
                 delta = i+d-@prior_result.indentation
-                if delta>4 and content[0,1] == "#"
+                if delta>4 and content =~ /^#(?![{])/
                     d -= delta
                     content[1,0] = ' '*delta
                 elsif delta>4 or ['[','(','{'].include? @prior_result[-1,1]
@@ -472,12 +539,15 @@ commit "Use {} for % notation delimiters wherever practical" do
 end
 
 commit "English names for special globals rather than line-noise" do
-    replace_terms { like '[$][?]'; with '$CHILD_STATUS';     tests({ 'if $? == 0' => 'if $CHILD_STATUS == 0' }) }
-    replace_terms { like '[$][$]'; with '$PID';              }
-    replace_terms { like '[$]&';   with '$MATCH';            }
-    replace_terms { like '[$]:';   with '$LOAD_PATH';        }
-    replace_terms { like '[$]!';   with '$ERROR_INFO';       }
-    replace_terms { like '[$]"';   with '$LOADED_FEATURES';  }
+    replace_terms { like '[$][?]';     with '$CHILD_STATUS';      tests('if $? == 0' => 'if $CHILD_STATUS == 0') }
+    replace_terms { like '[$][$]';     with '$PID';               }
+    replace_terms { like '[$]&';       with '$MATCH';             }
+    replace_terms { like '[$]:(?!:)';  with '$LOAD_PATH';         tests('$::var' => :unchanged, '$:.include?' => '$LOAD_PATH.include?') }
+    replace_terms { like '[$]!';       with '$ERROR_INFO';        }
+    replace_terms { like '^(.*)[$]"';  with '\1$LOADED_FEATURES'
+        provided { |prelude| prelude.balanced_quotes? }
+        tests('"$"' => :unchanged, '$"' => '$LOADED_FEATURES', 'if $"' => 'if $LOADED_FEATURES')
+    }
     %q{
           The code:
               { :acl => "~ ^\/catalog\/([^\/]+)$", :method => :find, :allow => '$1', :authenticated => true },
@@ -492,8 +562,14 @@ end
 
 commit "Use string interpolation" do
     replace_terms {
-        like '" *[+] ([$@]?[\w_0-9]+)(.to_s\b)?'
-        with '#{\1}"'
+        like '(.*)" *[+] ([$@]?[\w_0-9.:]+?)(.to_s\b)?(?! *[*(%\w_0-9.:{\[])'
+        with '\1#{\2}"'
+        provided { |prefix,suffix| (prefix+'"').balanced_quotes? }
+    }
+    replace_terms {
+        like '(.*)" *[+] *"'
+        with '\1'
+        provided { |first| (first+'"').balanced_quotes? }
     }
     replace_consecutive_lines {
         like %q{
@@ -513,11 +589,20 @@ end
 
 commit "Line modifiers are preferred to one-line blocks." do
     replace_consecutive_lines {
-        like '(while .*) do *$'
+        like '(while .*?) *do$'
         with '\1'
         examples_to_show 3
         rational "
             The do is unneeded in the block header form and causes problems
+            with the block-to-one-line transformation.
+        "
+    }
+    replace_consecutive_lines {
+        like '(if .*?) *then$'
+        with '\1'
+        examples_to_show 3
+        rational "
+            The then is unneeded in the block header form and causes problems
             with the block-to-one-line transformation.
         "
     }
@@ -558,8 +643,18 @@ commit "Booleans are first class values." do
             end
         }
         #with '\2 !!(\1)'
-        with '\2 \1'
+        with '\2 !!(\1)'
     }
+    # TODO:
+    # def found_file?(path, type = nil)
+    #     if data = found_files[path] and ! data_expired?(data[:time])
+    #       return false if type and ! data[:stat].send(type)
+    #       return true
+    #     else
+    #       return false
+    #     end
+    #   end
+
 end
 
 commit "Avoid explicit returns" do
@@ -670,42 +765,47 @@ commit "Don't restate results directly after assignment" do
     }
 end
 
-commit "Two space indentation" do
-    replace_lines {
-        like /^( +)(.*$)/
-        with { |indent,content| ' '*(indent.length/2)+content }
-        context 3
-        rational "
-            The ruby community almost universally (i.e. everyone but Luke & Markus) uses two-space indentation.
-            "
-        skip_files_where { |file_name,text| 
-            bad_indents = text.indentations.select { |indent| indent %4 != 0 }
-            "it has lines with unexpected indentation (#{bad_indents.join(",")})" unless bad_indents.empty?
-        }
-    }
-end
-
 commit "Avoid needless decorations" do
+    #validate_each_file { s = `spec spec/unit/parser/parser.rb 2>&1`; puts s; s =~ / 0 failures/ } 
     replace_terms {
-        like /self\.([a-z_]+)(?! *[-&|+*]*=)/
-        with '\1'
-        provided { |method| method != 'class' }
+        like /(.*)self\.([a-z_]+)\b(?! *[-&|+*]*=)/
+        with '\1\2'
+        provided { |prelude,method| method != 'class' and method != 'alias' and method != 'ensure' and prelude !~ /def +$/ }
         tests(
             "self.xyz"      => "xyz",
             "self.class"    => 'self.class',
             'self.x += 7'   => 'self.x += 7',
             'def self.foo'  => 'def self.foo'
         )
+        skip! #need to make sure we aren't going to collide with a local variable or parameter -- causes ~900 spec failures
     }
     replace_terms {
-        like /([a-z_]+)\(\)/
-        with '\1'
+        like /(.*)\b([a-z_]+)\(\)/
+        with '\1\2'
+        provided { |prefix,method| method != 'super'                  } # Because () means no arguments, and nothing means the same arguments we got
+        provided { |prefix,method| prefix !~ /\b#{method} *[-+|&]*=/  } # beware things like 'foo = foo()'!
+        provided { |prefix,method| prefix.balanced_quotes?            } # We don't want to change things like @parser.parse("tag()")
         #proc() -> proc
-        # but beware things like 'foo = foo()'!
     }
     replace_lines {
-        like /^(. *)end *#.*/
+        like /^( *)end *#.*/
         with '\1end'
+    }
+end
+
+commit "Two space indentation" do
+    replace_lines {
+        like /^( +)(.*$)/
+        with { |indent,content| ' '*(indent.length/2)+content }
+        context 3
+        rational "
+            The ruby community almost universally (i.e. everyone but Luke, Markus, and the other eleven people
+            who learned ruby in the 1900s) uses two-space indentation.
+            "
+        skip_files_where { |file_name,text| 
+            bad_indents = text.indentations.select { |indent| indent %4 != 0 }
+            "it has lines with unexpected indentation (#{bad_indents.join(",")})" unless bad_indents.empty?
+        }
     }
 end
 
@@ -715,4 +815,7 @@ error handling
 preserve stack traces
 output to $stderr
 
+links = links.intern if links.is_a? String --> links = links.to_sym
+
+blah hash[:x] if hash.has_key?[:x]; hash.delete(:x)
 
