@@ -258,7 +258,7 @@ class A_consecutive_line_replacement < A_replacement
     end
     def with(string=nil,desc=nil,&block)
         if string
-            super('\0'+string.gsub(/\\n/,"\n\\\\0"),string) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { $1+s[$2.to_i] } }
+            super('\0'+string.deindented.strip.gsub(/\\n/,"\n\\\\0"),string) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { $1+s[$2.to_i] } }
         else
             super string,desc,&block
         end
@@ -584,7 +584,12 @@ commit "Use string interpolation" do
             (indent+first+second).length < Line_length_limit
         }
         title "Don't use string concatenation to split lines unless they would be very long."
-    }    
+    }
+    replace_terms {
+        like '"([^"]+)" *%\n? *\[?([^,\]]+,?)+\]?$'
+        with { |format,*args| }
+        skip!
+    } 
 end
 
 commit "Line modifiers are preferred to one-line blocks." do
@@ -634,16 +639,121 @@ commit "Line modifiers are preferred to one-line blocks." do
 end
 
 commit "Booleans are first class values." do
+    #validate_each_file { s = `spec spec/unit/parser/resource.rb 2>&1`; puts s; s =~ / 0 failures/ } 
+    replace_consecutive_lines {
+        like %q{
+            return (.*?) if (.*)
+            return (.*)
+        }
+        with %q{
+            if \2
+                return \1
+            else
+                return \3
+            end
+        }
+    }
     replace_consecutive_lines {
         like %q{
             if (.*)
-                (.*) (true|\1)
+                (.*[^:])false
             else
-                \2 (false|nil)
+                \2true
             end
         }
-        #with '\2 !!(\1)'
-        with '\2 !!(\1)'
+        with '\2!(\1)'
+    }
+    replace_consecutive_lines {
+        like %q{
+            if (.*)
+                (.*[^:])true
+            else
+                \2false
+            end
+        }
+        with '\2!!(\1)'
+    }
+    replace_consecutive_lines {
+        like %q{
+            if (.*)
+                (.*[^:])\1
+            else
+                \2false
+            end
+        }
+        with '\2\1'
+    }
+    replace_consecutive_lines {
+        like %q{
+            if (.*)
+                (.*[^:])(.*)
+            else
+                \2false
+            end
+        }
+        with '\2(\1 and \3)'
+    }
+    replace_consecutive_lines {
+        like %q{
+            if (.*)
+                (.*[^:])nil
+            else
+                \2(true)
+            end
+        }
+        with '\2(\1||nil)'
+    }
+    replace_consecutive_lines {
+        like %q{
+            if (.*)
+                (.*[^:])true
+            else
+                \2nil
+            end
+        }
+        with '\2(\1||nil)'
+    }
+    replace_consecutive_lines {
+        like %q{
+            if (.*)
+                (.*[^:])\1
+            else
+                \2nil
+            end
+        }
+        with '\2\1||nil'
+    }
+    replace_consecutive_lines {
+        like %q{
+            if (.*)
+                (.*[^:])(.*)
+            else
+                \2nil
+            end
+        }
+        with '\2(\1 and \3)||nil'
+    }
+    replace_consecutive_lines {
+        like %q{
+            def (.*)
+                begin
+                    (.*) = Integer\((.*)\)
+                    return \2
+                rescue ArgumentError
+                    \2 = nil
+                end
+                if \2 = (.*)
+                    return \2
+                else
+                    return false
+                end
+            end
+        }
+        with %q{
+            def \1
+                Integer(\3) rescue \4 || false
+            end
+        }
     }
     # TODO:
     # def found_file?(path, type = nil)
@@ -654,7 +764,35 @@ commit "Booleans are first class values." do
     #       return false
     #     end
     #   end
-
+    #
+    #    return false unless defined?(Selinux)
+    #    if Selinux.is_selinux_enabled == 1
+    #      return true
+    #    end
+    #    return false
+    #  end
+    #
+    #    def evaluated?
+    #      if self.evaluated
+    #        true
+    #      else
+    #        false
+    #      end
+    #    end
+    #
+    #      if self.parent
+    #        if self.parent == aspect
+    #          return true
+    #        elsif self.parent.child_of?(aspect)
+    #          return true
+    #        else
+    #          return false
+    #        end
+    #      else
+    #        return false
+    #      end
+    #
+   
 end
 
 commit "Avoid explicit returns" do
