@@ -1,0 +1,6 @@
+markus=git://github.com/MarkusQ/puppet.git
+luke=git://github.com/lak/puppet.git
+
+luke:tickets/master/3015
+lak:feature/event_manager/resource_harness
+
