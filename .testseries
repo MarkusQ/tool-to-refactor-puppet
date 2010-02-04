@@ -2,5 +2,17 @@ markus=git://github.com/MarkusQ/puppet.git
 luke=git://github.com/lak/puppet.git
 
 luke:tickets/master/3015
-lak:feature/event_manager/resource_harness
+luke:feature/master/1481-tmp
+luke:feature/master/2276
+luke:feature/master/event_manager
+luke:feature/event_manager/resource_harness
+luke:feature/event_manager/rollback
+luke:feature/master/internal_dsl
+luke:feature/master/push_tarball
+luke:feature/master/single_executable
+luke:features/master/hash2resources
+luke:refactor/master/extracted_definedtype
+luke:refactor/master/graph_shadowing
+luke:refactor/master/no_relationship_graph
+luke:test_fixes
 

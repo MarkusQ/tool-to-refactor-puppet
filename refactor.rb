@@ -43,26 +43,40 @@ class String
     end
     def remove_leading_blank_lines
         l = as_lines
-        l.shift while not l.empty? and l.first.strip.empty?
+        l.shift while !l.empty? && l.first.strip.empty?
         l.join("\n")
     end
     def remove_trailing_blank_lines
         l = as_lines
-        l.pop   while not l.empty? and l.last.strip.empty?
+        l.pop   while !l.empty? && l.last.strip.empty?
         l.join("\n")
     end
     def remove_leading_and_trailing_blank_lines
         remove_leading_blank_lines.remove_trailing_blank_lines
     end
+    def split_into_opens_closes_and_others
+        chars = split('')
+        opens, chars = chars.partition { |ch| '[{(<'.include? ch }
+        closes,chars = chars.partition { |ch| ']})>'.include? ch }
+        return [opens.join,closes.join,chars.join]
+    end
     def balanced?(chars)
         # This is simpleminded, but will do for a start.
-        chars = chars.split(//)
-        opens, chars = chars.partition { |ch| ['[','{','(','<'].include? ch }
-        closes,chars = chars.partition { |ch| [']','}',')','>'].include? ch }
-        count(chars.join).even? and count(opens.join)-count(closes.join) == 0
+        opens,closes,others = chars.split_into_opens_closes_and_others
+        count(others).even? and nesting_depth(opens+closes) == 0
     end
     def balanced_quotes?
         balanced?('"') and balanced?("'")
+    end
+    def without_escaped_characters
+        gsub(/\\./,'')
+    end
+    def nesting_depth(chars="()[]{}")
+        # This is simpleminded, but will do for a start.
+        s = without_escaped_characters
+        opens,closes,others = chars.split_into_opens_closes_and_others
+        fail "Can't handle nesting depth for #{others.inspect} yet" unless others.empty?
+        s.count(opens) - s.count(closes)
     end
 end
 
@@ -70,8 +84,7 @@ module Git
     def self.tracked_files 
         @tracked_files ||= `git ls-files`.
           split("\n").
-          collect { |l| l.chomp}.
-          grep(/\.rb$/)
+          collect { |l| l.chomp}
     end
     def self.commit(msg,&block)
         yield
@@ -120,6 +133,7 @@ class A_replacement < A_container
         @pattern_description ||= desc || s.source
     end
     def with(*args,&block)
+        p args
         fail "Can't have more than one replacement" if @replacement
         @replacement_description ||= args.last
         @_replacement = args.first
@@ -188,7 +202,7 @@ class A_replacement < A_container
     def passes_tests?
         result = (tests || {}).all? { |a,b|
             c = apply_to('test',a.dup)
-            c == b || (c==a && b==:unchanged) || (puts "#{title} fails tests; expected #{a.inspect} to become #{b.inspect} but got #{c.inspect}") 
+            c == b || (c==a && b==:unchanged) || (puts "#{title} fails tests; expected \n    #{a.inspect}\n  to become \n    #{b.inspect}\n  but got \n    #{c.inspect}\n") 
         }
         @count,@examples = 0,[]
         result
@@ -258,7 +272,12 @@ class A_consecutive_line_replacement < A_replacement
     end
     def with(string=nil,desc=nil,&block)
         if string
-            super('\0'+string.deindented.strip.gsub(/\\n/,"\n\\\\0"),string) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { $1+s[$2.to_i] } }
+            p string
+            p string.remove_leading_and_trailing_blank_lines
+            p string.remove_leading_and_trailing_blank_lines.deindented
+            p string.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0")
+            super('\0'+string.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0"),string) { |*s| p s+[@_replacement]; @_replacement.gsub(/(\G|[^\\])[\\$](\d+)/) { $1+s[$2.to_i] } }
+            #super('\0'+string.gsub(/\\n/,"\n\\\\0"),string) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { $1+s[$2.to_i] } }
         else
             super string,desc,&block
         end
@@ -349,11 +368,14 @@ class A_commit
         @refactors << A_targeted_replacement.new(*args)
     end
     def excluded_files
-        ["lib/puppet/parser/parser.rb"]
+        [
+            "lib/puppet/parser/parser.rb",                                 # Generated code
+            "lib/puppet/util/rdoc/generators/template/puppet/puppet.rb"    # Lots of html
+        ]
     end
     def files
         fail unless excluded_files.all? { |f| Git.tracked_files.include? f }
-        Git.tracked_files - excluded_files
+        (Git.tracked_files - excluded_files).grep(/\.rb$/)
     end
     def to_s
         if refactors.length == 1
@@ -363,7 +385,7 @@ class A_commit
         end
     end
     def do_it
-        return puts("Skipping #{msg}") if @skip
+        return puts("Skipping #{msg}") if @skip or !(ARGV.empty? or ARGV.any? { |s| msg.include? s })
         puts msg
         refactors.reject! { |r| r.skip? }
         abort unless refactors.all? { |r| r.passes_tests? }
@@ -439,8 +461,9 @@ commit "Inconsistent indentation and related formatting issues" do
              +(.*)
         }
         with '\1 \2'
-        provided { |indent,first,second| 
+        provided { |indent,first,second|
             first.balanced_quotes? and second.balanced_quotes? and 
+            first !~ /^ *#/ and second !~ /^ *#/ and
             (indent+first+second).length < Line_length_limit
         }
         title "Don't arbitrarily wrap on sprintf (%) operator."
@@ -455,8 +478,7 @@ commit "Inconsistent indentation and related formatting issues" do
         provided { |indent,first,second| 
             first.balanced_quotes? and second.balanced_quotes? and 
             (indent+first+second).length < Line_length_limit and
-            (first.gsub(/\\./,'').count('([{') > first.gsub(/\\./,'').count(')]}')) and (first+second).balanced?('[](){}') and
-            first !~ /"\["/
+            first.nesting_depth > 0 and (first+second).balanced?('[](){}') and first !~ /"\["/ # This last can be removed when nesting depth respects quotes
         }
         title "Don't break short arrays/parameter list in two."
         tests(
@@ -585,10 +607,60 @@ commit "Use string interpolation" do
         }
         title "Don't use string concatenation to split lines unless they would be very long."
     }
+    replace_lines {
+        like ' do (.*?) end'
+        with ' {\1}'
+    }
     replace_terms {
-        like '"([^"]+)" *%\n? *\[?([^,\]]+,?)+\]?$'
-        with { |format,*args| }
-        skip!
+        like '"([^"\n]*%s[^"\n]*)" *% *(.+?)(?=$| *\b(do|if|while|until|unless)\b)'
+        with { |format,args| '"'+@parsed_format.zip(@parsed_args.collect {|a| '#{'+a.strip.sub(/\.to_s$/,'')+'}'}+[nil]).flatten.compact.join+'"'+@post }
+        provided { |format,args|
+            p [format,args]
+            @parsed_format = format.split('%s',-1)
+            log = []
+            if args =~ /^\[./
+                args,@post = args[0,1],args[1..-1]
+                args,@post = args+@post[0,1],@post[1..-1] until @post.empty? or args.balanced?("[]")
+                args = $1 if args =~ /^\[(.+)\]$/
+            else
+                args,@post = args[0,1],args[1..-1]
+                (log << [args,@post,args.nesting_depth]; args,@post = args+@post[0,1],@post[1..-1]) until @post.empty? || (args+@post[0,1]).nesting_depth < 0 || (args.nesting_depth == 0 && @post=~ /^(,|;|=>)/)
+                #@post = ''
+                #args,@post = args[0..-2],args[-1,1]+@post until args.balanced_quotes? and args.balanced?('[](){}')
+            end
+            @parsed_args = args.gsub('join(",','join("@~@').split(',').collect { |a| a.sub(/\.to_s$/,'').gsub(/@~@/,',') }
+            i = 0
+            while i < @parsed_args.length-1
+                if @parsed_args[i].nesting_depth == 0
+                    i += 1
+                else
+                    @parsed_args[i,2] = @parsed_args[i,2].join(',')
+                end
+            end
+            #org = "\"#{format}\" % #{args}"
+            result = (@parsed_format.length == @parsed_args.length + 1) && (!@parsed_format.join.include? '%') && @parsed_args.all? {|a| a.nesting_depth == 0 }
+            log.each { |i| p i } unless result
+            p [@parsed_format.length,@parsed_args.length,format,@parsed_args,@post,paa,result] unless result
+            result
+        }
+        examples_to_show 20
+        tests(
+            'msg = "%s access to %s [%s]" % [ (args[:node].nil? ? args[:ip] : "#{args[:node]}(#{args[:ip]})"), name, args[:method] ]' => 
+            'msg = "#{(args[:node].nil? ? args[:ip] : "#{args[:node]}(#{args[:ip]})")} access to #{name} [#{args[:method]}]"',
+            'raise Err,"type %s exists" % t.to_s if h(:q).include?(t)'  => 'raise Err,"type #{t} exists" if h(:q).include?(t)',
+            '"%s[%s]" % [@type, @title]'                                => '"#{@type}[#{@title}]"',
+            'args[0].split(/\./).map do |s| "dc=%s"%[s] end.join(",")'  => 'args[0].split(/\./).map do |s| "dc=#{s}" end.join(",")',
+            'args[0].split(/\./).map {|s| "dc=%s"%[s]}.join(",")'       => 'args[0].split(/\./).map {|s| "dc=#{s}"}.join(",")',
+            'debug(msg + ("(%s)" % label) + (" in %0.2f sec" % value))' => 'debug(msg + ("(#{label})") + (" in %0.2f sec" % value))',
+            'option("--#{method}", "-%s" % method.to_s[0,1] ) do'       => 'option("--#{method}", "-#{method.to_s[0,1]}") do',
+            '@cs = ("{#{@cst}}") + send("%s_file" % @cst, rp).to_s'     => '@cs = ("{#{@cst}}") + send("#{@cst}_file", rp).to_s',
+            'foo "stuff % bar" % list.collect { |x|'                    => :unchanged,
+            '"Could not find %s for overriding" % list.collect { |o|'   => :unchanged
+        )
+        # For why we use % interpolation, see:
+        #    commit 13069eca1a3e2b08f5201462021d83e2e0a81018
+        #    Author: Daniel Pittman <daniel@rimspace.net>
+        #    Date:   Tue Jul 29 15:52:23 2008 +1000
     } 
 end
 
@@ -619,7 +691,7 @@ commit "Line modifiers are preferred to one-line blocks." do
         }
         with '\2 \1'
         provided { |indent,condition,body|
-            condition !~ /\w+ *@?\w+ *=/           and
+            condition !~ /\w+ *@?\w+ *=/          and
             body !~ / (if|unless|while|unil) /    and 
             (indent+condition+body).length < Line_length_limit
         }
@@ -640,6 +712,28 @@ end
 
 commit "Booleans are first class values." do
     #validate_each_file { s = `spec spec/unit/parser/resource.rb 2>&1`; puts s; s =~ / 0 failures/ } 
+    replace_consecutive_lines {
+        like %q{
+            def (.*)
+                begin
+                    (.*) = Integer\((.*)\)
+                    return \2
+                rescue ArgumentError
+                    \2 = nil
+                end
+                if \2 = (.*)
+                    return \2
+                else
+                    return false
+                end
+            end
+        }
+        with %q{
+            def \1
+                Integer(\3) rescue \4 || false
+            end
+        }
+    }
     replace_consecutive_lines {
         like %q{
             return (.*?) if (.*)
@@ -681,7 +775,7 @@ commit "Booleans are first class values." do
                 \2false
             end
         }
-        with '\2\1'
+        with '\2(\1)'
     }
     replace_consecutive_lines {
         like %q{
@@ -691,7 +785,7 @@ commit "Booleans are first class values." do
                 \2false
             end
         }
-        with '\2(\1 and \3)'
+        with '\2(\1) && (\3)'
     }
     replace_consecutive_lines {
         like %q{
@@ -701,7 +795,7 @@ commit "Booleans are first class values." do
                 \2(true)
             end
         }
-        with '\2(\1||nil)'
+        with '\2(\1)||nil'
     }
     replace_consecutive_lines {
         like %q{
@@ -711,7 +805,7 @@ commit "Booleans are first class values." do
                 \2nil
             end
         }
-        with '\2(\1||nil)'
+        with '\2(\1)||nil'
     }
     replace_consecutive_lines {
         like %q{
@@ -721,7 +815,7 @@ commit "Booleans are first class values." do
                 \2nil
             end
         }
-        with '\2\1||nil'
+        with '\2(\1)||nil'
     }
     replace_consecutive_lines {
         like %q{
@@ -731,29 +825,7 @@ commit "Booleans are first class values." do
                 \2nil
             end
         }
-        with '\2(\1 and \3)||nil'
-    }
-    replace_consecutive_lines {
-        like %q{
-            def (.*)
-                begin
-                    (.*) = Integer\((.*)\)
-                    return \2
-                rescue ArgumentError
-                    \2 = nil
-                end
-                if \2 = (.*)
-                    return \2
-                else
-                    return false
-                end
-            end
-        }
-        with %q{
-            def \1
-                Integer(\3) rescue \4 || false
-            end
-        }
+        with '\2(\1 && \3)||nil'
     }
     # TODO:
     # def found_file?(path, type = nil)
@@ -771,6 +843,10 @@ commit "Booleans are first class values." do
     #    end
     #    return false
     #  end
+    #
+    # Not expecting a space before the common clause-prefix allowed this to
+    # work but broke with :true & :false -- adding the [^:] fixed that but
+    # now this doesn't work again.
     #
     #    def evaluated?
     #      if self.evaluated
@@ -840,7 +916,7 @@ commit "Omit needless checks on defined" do
         rational 'This makes detecting subsequent patterns easier.'
     }
     replace_terms {
-        like /defined\?\((.+?)\) and \1( |$)/
+        like /defined\?\((.+?)\) (?:and|&&) \1( |$)/
         with '\1\2'
         rational %q{
             In code like:
@@ -858,7 +934,7 @@ commit "Omit needless checks on defined" do
         }
     }
     replace_terms {
-        like /defined\?\((.+?)\) and ! *\1.nil\?/
+        like /defined\?\((.+?)\) (?:and|&&) ! *\1.nil\?/
         with '!\1.nil?'
         rational %q{
             In code like:
@@ -957,3 +1033,6 @@ links = links.intern if links.is_a? String --> links = links.to_sym
 
 blah hash[:x] if hash.has_key?[:x]; hash.delete(:x)
 
+1.9 compatibility (when :/then)
+
+#!/usr/bin/env ruby   to #!/usr/bin/env spec    in specs
