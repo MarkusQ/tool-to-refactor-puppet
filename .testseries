@@ -1,18 +1,71 @@
+#
+# Contributor repositories
+#
 markus=git://github.com/MarkusQ/puppet.git
 luke=git://github.com/lak/puppet.git
+jesse=git://github.com/jes5199/puppet.git
+brice=git://github.com/masterzen/puppet.git
+andrew=git://github.com/ajf/puppet.git
+ethanrowe=git://github.com/ethanrowe/puppet.git
+#
+# Branches to merge into master to produce testing branch
+#
+run specs
+testing
+reafactor/master/scope-v-compiler
+ethanrowe:tickets/master/2239                                             #= TERM signal
+#jesse:ticket/master/3148                                                  #= Bug fixes
+andrew:ticket/0.25.x/2805                                                 #= AIX support
+luke:tickets/master/2759                                                  #= Events
+markus:ticket/master/3225 from 221c5cecbc3ebf1e279f1d907993e9350c66dfe0   #= Fix for minor bug in luke:tickets/master/2759
+luke:tickets/master/3015                                                  #= Per Environment known resource types
+luke:tickets/master/1943                                                  #= Combine yaml & file termini
+brice:tickets/testing/2389  from c68d84b1c375831fb16648fb07b9d38f8bdaf96b #= Hashes
+luke:tickets/testing/2954   from 9b15984c199c81ffb2aac8a1aae4996a2cbde315 #= Class parameters; depends on 3015
+markus:feature/testing/2956 from 2c40ed8d2ebc1c45df243c118f17c91e88131494 #= Futures
+markus:refactor/master/3216                                               #= String interpolation
+jesse:feature/master/3115                                                 #= REST, first installment
+jesse:feature/master/3347                                                 #= XMLRPC filebucket to REST
+brice:tickets/0.25.x/3229                                                 #= regex case sensitivity
+luke:tickets/master/3096    from 13260c4c5bf7397bcde18600b862c6d4f2dbc663 #= internal DSL
 
-luke:tickets/master/3015
+#!ruby ../refactor/refactor.rb
+!ruby ../refactor/refactor.rb 'Miscellaneous oddity removal'
+!ruby ../refactor/refactor.rb 'Inconsistent indentation and related formatting issues'
+!ruby ../refactor/refactor.rb 'Use {} for % notation delimiters wherever practical'
+!ruby ../refactor/refactor.rb 'English names for special globals rather than line-noise'
+!ruby ../refactor/refactor.rb 'Use string interpolation'
+!ruby ../refactor/refactor.rb 'Line modifiers are preferred to one-line blocks.'
+!ruby ../refactor/refactor.rb 'Booleans are first class values.'
+!ruby ../refactor/refactor.rb 'Avoid explicit returns'
+!ruby ../refactor/refactor.rb 'Avoid unneeded blocks'
+!ruby ../refactor/refactor.rb 'Omit needless checks on defined'
+!ruby ../refactor/refactor.rb 'Use ||= for conditional initialization'
+!ruby ../refactor/refactor.rb 'Use &&= for dependent initialization'
+!ruby ../refactor/refactor.rb "Don't restate results directly after assignment"
+!ruby ../refactor/refactor.rb 'Avoid needless decorations'
+!ruby ../refactor/refactor.rb 'Two space indentation'
+#
+# Branches that we may want to merge 
+#
+skip rest
+#
+# Markus -------------------------------
+
+# Luke --------------------------------
+# 
+#  Need a ticket or remove from list
+#
 luke:feature/master/1481-tmp
-luke:feature/master/2276
+#luke:feature/master/2276
 luke:feature/master/event_manager
 luke:feature/event_manager/resource_harness
 luke:feature/event_manager/rollback
-luke:feature/master/internal_dsl
 luke:feature/master/push_tarball
 luke:feature/master/single_executable
 luke:features/master/hash2resources
-luke:refactor/master/extracted_definedtype
+#luke:refactor/master/extracted_definedtype
 luke:refactor/master/graph_shadowing
 luke:refactor/master/no_relationship_graph
-luke:test_fixes
+#
 

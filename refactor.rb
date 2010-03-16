@@ -54,15 +54,16 @@ class String
     def remove_leading_and_trailing_blank_lines
         remove_leading_blank_lines.remove_trailing_blank_lines
     end
-    def split_into_opens_closes_and_others
+    def split_into_opens_closes_and_others(chars_we_care_about='()[]{}<>')
         chars = split('')
-        opens, chars = chars.partition { |ch| '[{(<'.include? ch }
-        closes,chars = chars.partition { |ch| ']})>'.include? ch }
+        opens, chars = chars.partition { |ch| chars_we_care_about.include?(ch) and '[{(<'.include?(ch) }
+        closes,chars = chars.partition { |ch| chars_we_care_about.include?(ch) and ']})>'.include?(ch) }
         return [opens.join,closes.join,chars.join]
     end
     def balanced?(chars)
         # This is simpleminded, but will do for a start.
-        opens,closes,others = chars.split_into_opens_closes_and_others
+        opens,closes,others = chars.split_into_opens_closes_and_others(chars)
+        # Others are things like '|' and '/' that are ballanced when there are pairs of them.
         count(others).even? and nesting_depth(opens+closes) == 0
     end
     def balanced_quotes?
@@ -73,8 +74,9 @@ class String
     end
     def nesting_depth(chars="()[]{}")
         # This is simpleminded, but will do for a start.
-        s = without_escaped_characters
-        opens,closes,others = chars.split_into_opens_closes_and_others
+        s = without_escaped_characters.gsub(/^([^'"]*)('[^']*'|"[^"{#]*")/,'\1').gsub('#{','{').sub(/#.*$/,'')
+        # remove single quoted strings and double quoted strings with no interpolation (really neither '#' or '{')
+        opens,closes,others = chars.split_into_opens_closes_and_others(chars)
         fail "Can't handle nesting depth for #{others.inspect} yet" unless others.empty?
         s.count(opens) - s.count(closes)
     end
@@ -133,7 +135,7 @@ class A_replacement < A_container
         @pattern_description ||= desc || s.source
     end
     def with(*args,&block)
-        p args
+        #p args
         fail "Can't have more than one replacement" if @replacement
         @replacement_description ||= args.last
         @_replacement = args.first
@@ -272,11 +274,7 @@ class A_consecutive_line_replacement < A_replacement
     end
     def with(string=nil,desc=nil,&block)
         if string
-            p string
-            p string.remove_leading_and_trailing_blank_lines
-            p string.remove_leading_and_trailing_blank_lines.deindented
-            p string.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0")
-            super('\0'+string.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0"),string) { |*s| p s+[@_replacement]; @_replacement.gsub(/(\G|[^\\])[\\$](\d+)/) { $1+s[$2.to_i] } }
+            super('\0'+string.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0"),string) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d+)/) { $1+s[$2.to_i] } }
             #super('\0'+string.gsub(/\\n/,"\n\\\\0"),string) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { $1+s[$2.to_i] } }
         else
             super string,desc,&block
@@ -385,10 +383,11 @@ class A_commit
         end
     end
     def do_it
+        return puts("!ruby ../refactor/refactor.rb '#{msg}'") if ARGV[0] == 'script'
         return puts("Skipping #{msg}") if @skip or !(ARGV.empty? or ARGV.any? { |s| msg.include? s })
         puts msg
         refactors.reject! { |r| r.skip? }
-        abort unless refactors.all? { |r| r.passes_tests? }
+        return unless refactors.all? { |r| r.passes_tests? }
         #refactors.each { |r| puts '    ',r.to_s }
         unless Git.modified_files.empty?
             puts "The following files have been modifiied\n    #{Git.modified_files.join("\n    ")}\nPlease commit or revert and then try again."
@@ -485,6 +484,14 @@ commit "Inconsistent indentation and related formatting issues" do
             %q{
                 OPEN = /\(/
                 CLOSE = /\)/
+            } => :unchanged,
+            %q{
+               puts "to do something objectionable (such as tricking you into overwriting system"
+               puts "files if you are running as root)."
+            } => :unchanged,
+            %q{
+                puts "["
+                goo.print_to STDOUT; puts "]"
             } => :unchanged
         )
     }
@@ -495,6 +502,11 @@ commit "Inconsistent indentation and related formatting issues" do
                 \2
         }
         title "If arguments must wrap, treat them all equally"
+        provided { |prefix,arg| prefix !~ / *#/ }
+        tests(
+            #'     foo.bar(7,' => 
+            '     #foo.bar(7,' => :unchanged
+        )
     }
     replace_lines {
         like /^( *)(.*)/
@@ -553,8 +565,9 @@ commit "Inconsistent indentation and related formatting issues" do
 end
 
 commit "Use {} for % notation delimiters wherever practical" do
-    replace_terms { like '%([qQrwWx])\((.*?)\)';     with '%\1{\2}'; provided { |char,      body| !body.include?('}')} }
-    replace_terms { like '%([qQrwWx])\[(.*?)\]';     with '%\1{\2}'; provided { |char,      body| !body.include?('}')} }
+    replace_in 'spec/unit/parser/lexer.rb',%q{%q["string with ${['an array ',$v2]} in it."]} => %q{%q{"string with ${['an array ',$v2]} in it."}}
+    replace_terms { like '%([qQrwWx])\((.*?)\)';     with '%\1{\2}'; provided { |char,      body| !(body.include?('}') || body.include?('('))} }
+    replace_terms { like '%([qQrwWx])\[(.*?)\]';     with '%\1{\2}'; provided { |char,      body| !(body.include?('}') || body.include?('['))}; tests('%q[foo[]]' => :unchanged) }
     replace_terms { like '%([qQrwWx])<(.*?)>';       with '%\1{\2}'; provided { |char,      body| !body.include?('}')} }
     replace_terms { like '%([qQrwWx])([^{])(.*?)\2'; with '%\1{\3}'; provided { |char,delim,body| !body.include?('}')}; tests('%r!foo$!' => '%r{foo$}') }
     # Boo hoo:  at.files_matching %r!spec/(unit|integration)/#{m[1]}.rb!
@@ -615,7 +628,7 @@ commit "Use string interpolation" do
         like '"([^"\n]*%s[^"\n]*)" *% *(.+?)(?=$| *\b(do|if|while|until|unless)\b)'
         with { |format,args| '"'+@parsed_format.zip(@parsed_args.collect {|a| '#{'+a.strip.sub(/\.to_s$/,'')+'}'}+[nil]).flatten.compact.join+'"'+@post }
         provided { |format,args|
-            p [format,args]
+            #p [format,args]
             @parsed_format = format.split('%s',-1)
             log = []
             if args =~ /^\[./
@@ -639,8 +652,8 @@ commit "Use string interpolation" do
             end
             #org = "\"#{format}\" % #{args}"
             result = (@parsed_format.length == @parsed_args.length + 1) && (!@parsed_format.join.include? '%') && @parsed_args.all? {|a| a.nesting_depth == 0 }
-            log.each { |i| p i } unless result
-            p [@parsed_format.length,@parsed_args.length,format,@parsed_args,@post,paa,result] unless result
+            #log.each { |i| p i } unless result
+            #p [@parsed_format.length,@parsed_args.length,format,@parsed_args,@post,paa,result] unless result
             result
         }
         examples_to_show 20
@@ -655,8 +668,10 @@ commit "Use string interpolation" do
             'option("--#{method}", "-%s" % method.to_s[0,1] ) do'       => 'option("--#{method}", "-#{method.to_s[0,1]}") do',
             '@cs = ("{#{@cst}}") + send("%s_file" % @cst, rp).to_s'     => '@cs = ("{#{@cst}}") + send("#{@cst}_file", rp).to_s',
             'foo "stuff % bar" % list.collect { |x|'                    => :unchanged,
-            '"Could not find %s for overriding" % list.collect { |o|'   => :unchanged
-        )
+            '"Could not find %s for overriding" % list.collect { |o|'   => :unchanged,
+            'info "facts %s" % [::File.basename(file.sub(".rb",""))]'   => 'info "facts #{::File.basename(file.sub(".rb",""))}"'
+
+       )
         # For why we use % interpolation, see:
         #    commit 13069eca1a3e2b08f5201462021d83e2e0a81018
         #    Author: Daniel Pittman <daniel@rimspace.net>
@@ -1036,3 +1051,8 @@ blah hash[:x] if hash.has_key?[:x]; hash.delete(:x)
 1.9 compatibility (when :/then)
 
 #!/usr/bin/env ruby   to #!/usr/bin/env spec    in specs
+
+Why not @compiler.send(:evaluate_ast_node) --> @compiler.evaluate_ast_node?  Because it's how we call private methods when we aern't supposed to, that's why.
+
+
+

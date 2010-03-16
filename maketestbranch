@@ -1,0 +1,394 @@
+#!/usr/bin/env ruby
+
+Git_log = "maketestbranch.#{Time.now.to_i}"
+require 'digest/md5'
+module Git
+    class << self
+        attr_reader :command,:result
+        def try_to(x)
+            @command = "git #{x}"
+            #puts '-'*50,"On #{Git.current_branch}",@command
+            #puts caller[0,3]
+            #puts "#{Git.current_branch}(#{!!`git log`[/playing with nested scopes/]}): #{@command}"
+            @result  = `export GIT_COMMITTER_NAME='test branch'; export GIT_COMMITTER_EMAIL='puppet-dev@googlegroups.com';export GIT_COMMITTER_DATE="1266418253 -0800"; git #{x} 2>&1`
+            #puts `git log | head -n 5`
+            #puts "'#{@command}' failed!" unless successful?
+            #puts @result
+            File.open(Git_log,'a') { |f| f.puts @command } if successful? 
+        end
+        def array_from(output) 
+            output.split("\n").collect { |l| l.chomp.strip }
+        end
+        def tracked_files 
+            array_from(`git ls-files`)
+        end
+        def commit(msg,&block)
+            yield if block_given?
+            File.open('refactor_msg.mqr','w') { |f| f.print msg }
+            try_to "commit -a --file refactor_msg.mqr"
+            File.delete 'refactor_msg.mqr'
+            successful?
+        end
+        def modified_files
+            `git status`.scan(/^#\s*modified:\s*(.*)/).flatten
+        end
+        def unmerged_files
+            `git status`.scan(/^#\s*unmerged:\s*(.*)/).flatten
+        end
+        def diff(*args)
+            `git diff #{args.join(' ')}`
+        end
+        def branches
+            array_from(`git branch`.gsub(/\*/,''))
+        end
+        def current_branch
+            `git branch`.scan(/^\* *(.*)/).flatten.first
+        end
+        def checkout(branch,base = nil)
+            if base
+                checkout(base) and delete_branch(branch) and try_to "checkout -b #{branch}"
+            else
+                try_to "checkout #{branch}"
+            end
+            successful?
+        end
+        def delete_branch(branch)
+            try_to "branch -D #{branch}" if Git.branches.include? branch
+            successful?
+        end
+        def rename_branch(old,new)
+            branch('-m',old,new)
+        end
+        def method_missing(*args)
+            try_to args.join(' ')
+            successful?
+        end
+        def fetch(source,remote,branch)
+            delete_branch(branch) and try_to "fetch -f #{source} #{remote}:#{branch}"
+            successful?
+        end
+        def current_commit
+            `git log --pretty=oneline -n 1`[/[0-9a-f]+/]
+        end
+        def commits_since(commit)
+            array_from(`git log #{commit}.. --abbrev-commit --pretty=oneline`)
+        end
+        def conflicts_in?(file)
+            File.exists?(file) and !File.readlines(file).grep(/^[<=>]{7}/).empty?
+        end
+        def successful?
+            !error_message
+        end
+        def abort_rebase_to(branch)
+            rebase('--abort')
+            `rm -fr .git/rebase-apply/`
+            checkout('testing')
+            reset('--hard')
+       end
+       def error_message
+            case @result
+            when /^fatal: (.*)$/; "#{@command} --> #{$1}"
+            when /^error: (.*)$/; "#{@command} --> #{$1}"
+            when /^(.*failed.*)/; "#{@command} --> #{$1}"
+            when /(Merge conflict in.*)/; "#{@command} -- #{$1}"
+            when /It seems that I cannot create a rebase-apply directory/; @result
+            end
+        end
+    end
+end
+
+module Resolutions
+    class << self
+        def path_as_file_name(path)
+            path.gsub('/','-')
+        end
+        def patch_name(file,n)
+            "merge-conflict/resolutions/#{path_as_file_name(file)}/#{n}.patch"
+        end
+        def branch_name(file,md5)
+            "merge-conflict/#{path_as_file_name(file)}/#{md5}"
+        end
+        def delete_if_present(file)
+            File.delete(file) if File.exists? file
+        end
+        def delete_patch_temp_files(file)
+            delete_if_present(file+'.rej')
+            delete_if_present(file+'.orig')
+        end
+        def apply_for(file)
+            delete_patch_temp_files(file)
+            Dir[patch_name(file,'*')].sort_by {|patch| patch[/(\d+)\.patch$/,1].to_i }.each { |patch|
+                #puts [patch,`patch -p 1 < #{patch}`.split("\n"),$CHILD_STATUS].flatten.collect { |l| "        #{l}" }
+                `patch -p 1 < #{patch}`
+                delete_patch_temp_files(file)
+            }
+            %q{
+                merge-conflict/resolutions/spec-unit-util-rdoc-parser.rb/1.patch
+                patching file spec/unit/util/rdoc/parser.rb
+                Reversed (or previously applied) patch detected!  Assume -R? [n] 
+                Apply anyway? [n] 
+                Skipping patch.
+                1 out of 1 hunk ignored -- saving rejects to file spec/unit/util/rdoc/parser.rb.rej
+                
+                merge-conflict/resolutions/spec-unit-util-rdoc-parser.rb/2.patch
+                patching file spec/unit/util/rdoc/parser.rb
+                
+                Hunk #5 FAILED at 2108.
+                Hunk #6 succeeded at 2523 (offset 404 lines).
+                Hunk #7 FAILED at 2568.
+                :
+                Hunk #26 FAILED at 2845.
+                25 out of 26 hunks FAILED -- saving rejects to file lib/puppet/parser/parser.rb.rej
+            }
+        end
+        def mk_path_to(file)
+            unless File.directory?(b = File.dirname(file))
+                mk_path_to(b)
+                Dir.mkdir(b)
+            end
+        end 
+        def needed_for(file,contents,merge_branch) 
+            #   produce branches for each of the unresolved merge conflicts for the failed merges
+            #   See http://all-thing.net/git-conflict-resolution for why we don't use git-rerere
+            conflict_branch = branch_name(file,Digest::MD5.hexdigest(contents.join))
+            unless Git.branches.include? conflict_branch
+                Git.checkout(conflict_branch,merge_branch)
+                mk_path_to(file)
+                File.open(file,'w') { |f| f.print contents }
+                Git.add(file)
+                Git.commit("Unresolved conflicts in #{file}")
+                #"Conflicts merging #{file} written to #{conflict_branch}"
+            end
+            "git checkout #{conflict_branch}; vim #{file}; git commit -a -m foo"
+        end
+        def look_for_new 
+            resolutions = []
+            Git.branches.grep(/^merge-conflict\/.*\/[0-9a-f]{32}$/).each { |conflict_branch|
+                #puts "Checking #{conflict_branch}"
+                Git.checkout(conflict_branch)
+                file = conflict_branch[%r{/(.*)/},1].gsub('-','/')
+                if !Git.conflicts_in?(file)
+                    #puts "Resolved"
+                    resolutions <<  [file,Git.diff('HEAD^',file)]
+                    Git.checkout('master')
+                    Git.delete_branch(conflict_branch)
+                end
+            }
+
+            Git.checkout('master')
+            resolutions.each { |file,resolution|
+                mk_path_to(patch_name(file,'x'))
+                n = 1
+                n += 1 while File.exists?(patch_name(file,n))
+                File.open(patch_name(file,n),'w') {|f| f.print resolution }
+            }
+            # But we don't add and commit them because that way lies maddness.
+            @@branches_seen = ['???']
+            @@fixups = Hash[*File.read('merge-conflict/fixups').split(/^Resolving *conflicts *between *(.* and .*) *$/,-1)[1..-1]]
+        end
+        def apply_fixups_for(branch)
+            @@branches_seen.each { |other_branch|
+                patches = [@@fixups["#{branch} and #{other_branch}"],@@fixups["#{other_branch} and #{branch}"]].compact.join("\n")
+                unless patches.empty?
+                    patches.scan(/^(diff.*)^end-diff$/m).flatten.each { |patch|
+                        file = patch[/ a\/(.*rb) /,1]
+                        delete_patch_temp_files(file)
+                        File.open('temp-fixup.patch','w') { |f| f.print patch }
+                        `patch -p 1 < temp-fixup.patch`
+                        delete_patch_temp_files(file)
+                        Git.add(file)
+                    }
+                    Git.commit("Resolving conflicts between #{branch} and #{other_branch}")
+                end
+            }
+            @@branches_seen << branch
+        end
+    end
+end
+
+module Spec_test
+    require 'yaml'
+    Result_cache = '../refactor/spec_results'
+    #Spec_test_results = Hash.new { |h,commit| h[commit] = `sudo ruby install.rb &> /dev/null; rake spec 2>&1 | tail -n 1`}
+    Results = Hash.new { |h,commit| 
+        x = `sudo ruby install.rb &> /dev/null; rake spec 2>&1`.split("\n") 
+        te = Hash.new(0)
+        te[:total] = x.last
+        re = /^\.\/spec\/((unit|integration).*):\d+:$/
+        x.grep(re).each { |l| l =~ re; te[$1] += 1}
+        h[commit] = te
+    }
+    Prior = Hash.new(0)
+    def self.changes_in(commit)
+        delta = []
+        latest = Results[commit]
+        (Prior.keys + latest.keys - [:total]).sort.uniq.each { |f|
+            c1,c2 = Prior[f],(latest[f] || 0)
+            if c2 > c1
+                delta << "#{c2-c1} more in #{f} (#{c2} total)"
+            elsif c2 < c1
+                delta << "#{c1-c2} fewer in #{f} (#{c2} total)"
+            end
+        }
+        Prior.clear.update(latest)
+        delta
+    end
+    %q{
+    et = Hash.new { |et,c| et[c] = [] }
+    te.each { |f,c| et[c] << f }
+    et.keys.each { |c| 
+        et[c] = et[c].sort.join(', ').
+            sub(/integration\/(.)/,'integration: \1').gsub(/integration\//,'').
+            sub(/unit\/(.)/,'unit: \1').gsub(/unit\//,'').
+            gsub(/(.{1,60}), /,"\\1,\n                ") 
+    }
+    errors = et.to_a.sort_by { |c,fs| c }.collect { |c,fs| "\n        #{c} error#{(c == 1) ? '' : 's'} in #{fs}" }
+    h[commit] = x.last+errors.join+"\n"
+    }
+    Results.update(YAML.load_file(Result_cache)) rescue nil
+    at_exit { File.open(Result_cache,'w') { |f| YAML.dump(Results,f)} }
+end
+
+def try_to_rebase(sources,branch_to_merge,first_commit)
+    if branch_to_merge =~ /(\w+)\s*:\s*(\S+)/
+        # It's a remote branch; fetch it as testing-temp
+        Git.fetch(sources[$1],$2,'testing-temp') and Git.checkout('testing-temp') or fail(Git.error_message)
+    else
+        # It's local; start testing temp off of it
+        Git.checkout('testing-temp',branch_to_merge)
+    end
+    if first_commit
+        fail "#{first_commit} not found" unless Git.show(first_commit)
+        Git.rebase('-m','--onto testing',first_commit+'^','testing-temp')
+    elsif Git.show($head_of_master)
+        Git.rebase('-m','--onto testing',$head_of_master,'testing-temp')
+    else
+       Git.rebase('-m','testing','testing-temp')
+    end
+end
+
+    #test_series = %x{git config --get puppet.testseriesfile}.chomp
+    #test_series = '.testseries' if test_series.empty?
+    test_series = '../refactor/.testseries'
+    sources = Hash.new {|h,k| h[k] = "git://github.com/#{k}/puppet.git"}
+
+    unless Git.modified_files.empty?
+        puts "There are uncommited modifications in the following files:",
+            Git.modified_files,
+            "Please resolve (i.e. commit or revert) and try again."
+        abort
+    end
+
+    Resolutions.look_for_new
+    Git.checkout('testing','master')
+    results = []
+    conflicts = []
+    run_specs = skip_rest = false
+    prior_spec_results = {}
+    $head_of_master = Git.current_commit
+    File.readlines(test_series).each do |line|
+        Git.checkout('testing')
+        branch_desc = line[/#= *(.*?)(;|$)/,1]
+        line = line.chomp.gsub(/#.*$/,'').strip # ignore trailing spaces, "\n", '#' comments
+        case line
+        when /^\s*$/ # ignore blank lines
+        when /^!(.*)/
+            if skip_rest
+                results << "skipped running #{$1}"
+            else
+                head_at_start = Git.current_commit
+                `#{$1}`
+                results << "ran #{$1}" + 
+                    ":\n    * "+Git.commits_since(head_at_start).reverse.join("\n    * ")+
+                    (run_specs ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
+            end
+        when /(\w+)\s*=\s*(.+)/
+            sources[$1] = $2
+            # markus= git@github.com:MarkusQ/puppet.git
+        when /^ *skip *rest/; skip_rest = true
+        when /^ *run *specs/; run_specs = true
+        else
+            branch_to_merge,first_commit = (line =~ /(.*) *from *([0-9a-f]+)/) ? [$1,$2] : [line,nil]
+            try_to_recover = branch_to_merge.gsub!(/^~/,'')
+            result = ''
+            if skip_rest
+                result = 'skipped'
+            else
+                begin
+                    result = 'succeeded'
+                    head_at_start = Git.current_commit
+                    fail if Git.commits_since(head_at_start).length > 1
+                    try_to_rebase(sources,branch_to_merge,first_commit)
+                    skipped_commits = []
+                    conflicts = []
+                    try_three_way = true
+                    while not Git.successful?
+                        if Git.error_message =~ /Patch failed at \d+ (.*)/ or Git.error_message =~ /Merge conflict in /
+                            commit_name = $1
+                            all_better = true
+                            Git.unmerged_files.each { |file|
+                                begin
+                                    #puts "Looking for resolultions to conflict(s) in #{file}"
+                                    Resolutions.apply_for(file)
+                                    if file == 'lib/puppet/parser/parser.rb'
+                                        `cd lib/puppet/parser; racc grammar.ra -o parser.rb`
+                                    end
+                                    if Git.conflicts_in?(file)
+                                        all_better = false
+                                        conflicts << [file,File.readlines(file),Git.current_commit]
+                                        #puts "Could not fix conflict(s) in #{file}"
+                                    else
+                                        Git.add(file)
+                                        #puts "Fixed conflict(s) in #{file}"
+                                    end
+                                rescue => e
+                                    puts e,e.backtrace
+                                end
+                            }
+                            #puts "Tried all the patches"
+                            if all_better and Git.unmerged_files.empty?
+                                Git.rebase('--continue')
+                            elsif try_three_way
+                                puts "    trying three way..."
+                                try_three_way = false
+                                conflicts = []
+                                Git.config('--add','merge.conflictstyle','diff3')
+                                Git.abort_rebase_to('testing')
+                                fail unless Git.current_commit == head_at_start
+                                try_to_rebase(sources,branch_to_merge,first_commit)
+                            elsif try_to_recover
+                                skipped_commits << "Skipping #{commit_name}"
+                                Git.rebase('--skip')
+                                puts "Skipping #{commit_name}",Git.result
+                                result = 'partially succeeded'
+                            else
+                                fail "Merge conflict resolutions needed."
+                            end
+                        else
+                            #      * if it fails for some other reason...?
+                            fail Git.error_message
+                       end
+                    end
+                    Resolutions.apply_fixups_for(branch_to_merge.gsub(/\s/,''))
+                    Git.delete_branch('testing') and Git.rename_branch('testing-temp','testing') or fail Git.error_message
+                    result += ":\n    * "+Git.commits_since(head_at_start).reverse.join("\n    * ")+
+                        (skipped_commits.empty? ? '' : ["\n  ..skipped",skipped_commits].flatten.join("\n    "))+
+                        (run_specs ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
+                rescue => e
+                    how_far_we_got = "\n    x "+Git.commits_since(head_at_start).reverse.join("\n    x ")
+                    Git.abort_rebase_to('testing')
+                    Git.delete_branch('testing-temp')
+                    result = "failed: #{e}"+
+                        how_far_we_got+
+                        conflicts.collect { |file,contents,merge_branch| "\n    "+Resolutions.needed_for(file,contents,merge_branch) }.join
+                ensure
+                    Git.config('--unset','merge.conflictstyle')
+                end
+            end
+            results << branch_to_merge+(branch_desc ? " (#{branch_desc})" : '')+' '+result
+        end
+        puts results
+        results = []
+    end
+    #puts results
+
