@@ -104,7 +104,7 @@ module Resolutions
             s.gsub(/^-(<{7}|\|{7}|>{7}|={7}) .*$/,'-\1')
         end
         def strip_tags_from_markers_in(file)
-            s = strip_tags_from_merkers(File.read(file))
+            s = strip_tags_from_markers(File.read(file))
             File.open(file,'w') { |f| f.print s }
         end
         def path_as_file_name(path)
