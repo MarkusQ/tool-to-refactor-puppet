@@ -253,7 +253,7 @@ module Spec_test
             end
         }
         Prior.clear.update(latest)
-        delta
+        delta.reject { |l| l =~ /^1 (more|fewer) in unit\/status.rb \([01] total\)/ }
     end
     %q{
     et = Hash.new { |et,c| et[c] = [] }
@@ -320,9 +320,12 @@ end
             else
                 head_at_start = Git.current_commit
                 `#{$1}`
+                new_commits = Git.commits_since(head_at_start)
                 results << "ran #{$1}" + 
-                    ":\n    * "+Git.commits_since(head_at_start).reverse.join("\n    * ")+
+                    (new_commits.empty? ? '' : (
+                    ":\n    * "+new_commits.reverse.join("\n    * ")+
                     (run_specs ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
+                    ))
             end
         when /(\w+)\s*=\s*(.+)/
             sources[$1] = $2
@@ -370,7 +373,7 @@ end
                             if all_better and Git.unmerged_files.empty?
                                 Git.rebase('--continue')
                             elsif try_three_way
-                                puts "    trying three way..."
+                                #puts "    trying three way..."
                                 try_three_way = false
                                 conflicts = []
                                 Git.config('--add','merge.conflictstyle','diff3')
@@ -392,14 +395,14 @@ end
                     end
                     Resolutions.apply_fixups_for(branch_to_merge.gsub(/\s/,''))
                     Git.delete_branch('testing') and Git.rename_branch('testing-temp','testing') or fail Git.error_message
-                    result += ":\n    * "+Git.commits_since(head_at_start).reverse.join("\n    * ")+
+                    result += ":\n    * "+Git.commits_since(head_at_start).reverse.collect {|x| x[0,75] + ((x.length>75)? '...':'') }.join("\n    * ")+
                         (skipped_commits.empty? ? '' : ["\n  ..skipped",skipped_commits].flatten.join("\n    "))+
                         (run_specs ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
                 rescue => e
                     how_far_we_got = "\n    x "+Git.commits_since(head_at_start).reverse.join("\n    x ")
                     Git.abort_rebase_to('testing')
                     Git.delete_branch('testing-temp')
-                    result = "failed: #{e}\n#{[e.backtrace].flatten.join("\n")}\n"
+                    result = "failed: #{e}" + #"\n#{[e.backtrace].flatten.join("\n")}\n"+
                         how_far_we_got+
                         conflicts.collect { |file,contents,merge_branch| "\n    "+Resolutions.needed_for(file,contents,merge_branch) }.join
                 ensure

@@ -134,6 +134,24 @@ class A_replacement < A_container
         @pat = s
         @pattern_description ||= desc || s.source
     end
+    def determ(s)
+        # Take
+        #    TERM(7) to 7
+        #    TERM(3+4) to (3+4)
+        #    EXP(3+4) to 3+4
+        #    EXP(a = 3+4) to (a = 3+4)
+        # etc. for TERM,FACTOR,EXPR,STMNT, etc.
+        # They may be nested, contain blocks, etc., e.g.
+        #    TERM(z.collect { |b| EXP(b*b) }) doesn't need parins
+        # Better to make them use a lambda for with and avoid the nesting issues?
+        #     instead of
+        #            with '\3EXP(TERM(\2)||TERM(\4))'
+        #     they'd write
+        #            with { |indent,var,exp1,use,exp2| use+expression(term(exp1)+'||'+term(exp2)) }    
+        #            with { |indent,var,exp1,use,exp2| use+(exp1.term+'||'+exp2.term).exp }
+        #     but we still have to parse the contents over and over.
+        #            with { |indent,var,exp1,use,exp2| use+[exp1.term,'||',exp2.term].exp }    
+    end
     def with(*args,&block)
         #p args
         fail "Can't have more than one replacement" if @replacement
@@ -784,6 +802,17 @@ commit "Booleans are first class values." do
     }
     replace_consecutive_lines {
         like %q{
+            if ([a-z_]) = (.*)
+                (.*[^:])\1
+            else
+                \3(.*)
+            end
+        }
+        with '\3((\2)||(\4))'
+        provided { |indent,var,exp1,use,exp2| exp1 !~ / and | or |\|\||&&/ }
+    }
+    replace_consecutive_lines {
+        like %q{
             if (.*)
                 (.*[^:])\1
             else
@@ -840,7 +869,7 @@ commit "Booleans are first class values." do
                 \2nil
             end
         }
-        with '\2(\1 && \3)||nil'
+        with '\2((\1) && (\3))||nil'
     }
     # TODO:
     # def found_file?(path, type = nil)
