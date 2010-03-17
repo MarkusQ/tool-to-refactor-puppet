@@ -12,9 +12,9 @@ ethanrowe=git://github.com/ethanrowe/puppet.git
 #
 run specs
 testing
-reafactor/master/scope-v-compiler
+markus:reafactor/master/scope-v-compiler                                  #= Moving things out of compiler to fix bugs
 ethanrowe:tickets/master/2239                                             #= TERM signal
-#jesse:ticket/master/3148                                                  #= Bug fixes
+jesse:ticket/master/3148                                                  #= Bug fixes
 andrew:ticket/0.25.x/2805                                                 #= AIX support
 luke:tickets/master/2759                                                  #= Events
 markus:ticket/master/3225 from 221c5cecbc3ebf1e279f1d907993e9350c66dfe0   #= Fix for minor bug in luke:tickets/master/2759
@@ -27,8 +27,8 @@ markus:refactor/master/3216                                               #= Str
 jesse:feature/master/3115                                                 #= REST, first installment
 jesse:feature/master/3347                                                 #= XMLRPC filebucket to REST
 brice:tickets/0.25.x/3229                                                 #= regex case sensitivity
-luke:tickets/master/3096    from 13260c4c5bf7397bcde18600b862c6d4f2dbc663 #= internal DSL
-
+luke:tickets/master/3096    from b92f3175a885bda49b86aed1d32b9d6466360bcf #= internal DSL
+#skip rest
 #!ruby ../refactor/refactor.rb
 !ruby ../refactor/refactor.rb 'Miscellaneous oddity removal'
 !ruby ../refactor/refactor.rb 'Inconsistent indentation and related formatting issues'
