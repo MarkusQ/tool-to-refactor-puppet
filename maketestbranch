@@ -101,7 +101,7 @@ module Resolutions
     class << self
         def strip_tags_from_markers(s)
             return s.collect { |l| strip_tags_from_markers(l) } if s.is_a? Array
-            s.gsub(/^(-?(<{7}|\|{7}|>{7}|={7})) .*$/,'-\1')
+            s.gsub(/^(-?(<{7}|\|{7}|>{7}|={7})) .*$/,'\1')
         end
         def strip_tags_from_markers_in(file)
             s = strip_tags_from_markers(File.read(file))
