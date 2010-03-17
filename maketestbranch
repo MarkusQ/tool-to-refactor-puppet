@@ -217,9 +217,21 @@ module Resolutions
 end
 
 module Spec_test
+    #
+    # We shouldn't need to install the app to have the tests run repeatably, yet we do.  We should be able
+    # to turn off the output from install.rb, but there's no option for this.  We should be able to pipe
+    # stderr from the process to /dev/null (it works on some systems, and works on the rake tasks on all
+    # the systems tested) but redirecting stderr of install.rb does not seem to work on Ubuntu 9.10/MRI 
+    # 1.8.7 so, since we're already several levels deep in kludgevile we go for a quick, clean kill...
+    #
+    File.open('quietly_install.rb','w') { |f| f.print File.read('install.rb').gsub(/:verbose *=> *true/,':verbose => false') }
+    at_exit { File.delete('quietly_install.rb') }
+    #
+    # ...and remember, it only hurts more if you flinch.
+    #
     require 'yaml'
     Result_cache = '../refactor/spec_results'
-    #Spec_test_results = Hash.new { |h,commit| h[commit] = `sudo ruby install.rb 2> /dev/null > /dev/null; rake spec 2>&1 | tail -n 1`}
+    #Spec_test_results = Hash.new { |h,commit| h[commit] = `sudo ruby quietly_install.rb 2> /dev/null > /dev/null; rake spec 2>&1 | tail -n 1`}
     Results = Hash.new { |h,commit| 
         x = `sudo ruby install.rb &> /dev/null; rake spec 2>&1`.split("\n") 
         te = Hash.new(0)
