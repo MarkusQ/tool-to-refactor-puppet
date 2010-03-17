@@ -224,7 +224,7 @@ module Spec_test
     # the systems tested) but redirecting stderr of install.rb does not seem to work on Ubuntu 9.10/MRI 
     # 1.8.7 so, since we're already several levels deep in kludgevile we go for a quick, clean kill...
     #
-    File.open('quietly_install.rb','w') { |f| f.print File.read('install.rb').gsub(/:verbose *=> *true/,':verbose => false') }
+    File.open('quietly_install.rb','w') { |f| f.print File.read('install.rb').gsub(/(:verbose *=>|haveftools *=) *true/,'\1 false') }
     at_exit { File.delete('quietly_install.rb') }
     #
     # ...and remember, it only hurts more if you flinch.
@@ -339,7 +339,6 @@ end
                 begin
                     result = 'succeeded'
                     head_at_start = Git.current_commit
-                    fail if Git.commits_since(head_at_start).length > 1
                     try_to_rebase(sources,branch_to_merge,first_commit)
                     skipped_commits = []
                     conflicts = []
