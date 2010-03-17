@@ -99,6 +99,14 @@ end
 
 module Resolutions
     class << self
+        def strip_tags_from_markers(s)
+            return s.collect { |l| strip_tags_from_markers(l) } if s.is_a? Array
+            s.gsub(/^-(<{7}|\|{7}|>{7}|={7}) .*$/,'-\1')
+        end
+        def strip_tags_from_markers_in(file)
+            s = strip_tags_from_merkers(File.read(file))
+            File.open(file,'w') { |f| f.print s }
+        end
         def path_as_file_name(path)
             path.gsub('/','-')
         end
@@ -116,8 +124,10 @@ module Resolutions
             delete_if_present(file+'.orig')
         end
         def apply_for(file)
+            strip_tags_from_markers_in(file)
             delete_patch_temp_files(file)
             Dir[patch_name(file,'*')].sort_by {|patch| patch[/(\d+)\.patch$/,1].to_i }.each { |patch|
+                strip_tags_from_markers_in(patch)
                 #puts [patch,`patch -p 1 < #{patch}`.split("\n"),$CHILD_STATUS].flatten.collect { |l| "        #{l}" }
                 `patch -p 1 < #{patch}`
                 delete_patch_temp_files(file)
@@ -154,7 +164,7 @@ module Resolutions
             unless Git.branches.include? conflict_branch
                 Git.checkout(conflict_branch,merge_branch)
                 mk_path_to(file)
-                File.open(file,'w') { |f| f.print contents }
+                File.open(file,'w') { |f| f.print strip_tags_from_markers(contents) }
                 Git.add(file)
                 Git.commit("Unresolved conflicts in #{file}")
                 #"Conflicts merging #{file} written to #{conflict_branch}"
@@ -169,7 +179,7 @@ module Resolutions
                 file = conflict_branch[%r{/(.*)/},1].gsub('-','/')
                 if !Git.conflicts_in?(file)
                     #puts "Resolved"
-                    resolutions <<  [file,Git.diff('HEAD^',file)]
+                    resolutions <<  [file,strip_tags_from_markers(Git.diff('HEAD^',file))]
                     Git.checkout('master')
                     Git.delete_branch(conflict_branch)
                 end
