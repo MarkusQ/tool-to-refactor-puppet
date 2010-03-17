@@ -209,7 +209,7 @@ end
 module Spec_test
     require 'yaml'
     Result_cache = '../refactor/spec_results'
-    #Spec_test_results = Hash.new { |h,commit| h[commit] = `sudo ruby install.rb &> /dev/null; rake spec 2>&1 | tail -n 1`}
+    #Spec_test_results = Hash.new { |h,commit| h[commit] = `sudo ruby install.rb 2>&1 > /dev/null; rake spec 2>&1 | tail -n 1`}
     Results = Hash.new { |h,commit| 
         x = `sudo ruby install.rb &> /dev/null; rake spec 2>&1`.split("\n") 
         te = Hash.new(0)
