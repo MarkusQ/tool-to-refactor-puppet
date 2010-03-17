@@ -12,7 +12,7 @@ ethanrowe=git://github.com/ethanrowe/puppet.git
 #
 run specs
 testing
-markus:reafactor/master/scope-v-compiler                                  #= Moving things out of compiler to fix bugs
+markus:refactor/master/scope-v-compiler                                   #= Moving things out of compiler to fix bugs
 ethanrowe:tickets/master/2239                                             #= TERM signal
 jesse:ticket/master/3148                                                  #= Bug fixes
 andrew:ticket/0.25.x/2805                                                 #= AIX support
