@@ -400,7 +400,7 @@ end
                     how_far_we_got = "\n    x "+Git.commits_since(head_at_start).reverse.join("\n    x ")
                     Git.abort_rebase_to('testing')
                     Git.delete_branch('testing-temp')
-                    result = "failed: #{e}"+
+                    result = "failed: #{e}\n#{[e.backtrace].flatten.join("\n")}\n"
                         how_far_we_got+
                         conflicts.collect { |file,contents,merge_branch| "\n    "+Resolutions.needed_for(file,contents,merge_branch) }.join
                 ensure
