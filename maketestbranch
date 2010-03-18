@@ -33,7 +33,7 @@ module Git
             `git status`.scan(/^#\s*modified:\s*(.*)/).flatten
         end
         def unmerged_files
-            `git status`.scan(/^#\s*unmerged:\s*(.*)/).flatten
+            `git status`.scan(/^#\s*(?:unmerged|both modified):\s*(.*)/).flatten
         end
         def diff(*args)
             `git diff #{args.join(' ')}`
