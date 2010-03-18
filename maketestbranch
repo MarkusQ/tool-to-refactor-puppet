@@ -31,17 +31,17 @@ module Git
         end
         def head_author_date
             #`git log --format="%at" head^..`.chomp fails if tree messy
-            `git log --format="%at" | head -n 1`.chomp
+            `git log --format="%ai" | head -n 1`.chomp
         end
         def commit(msg,&block)
             yield if block_given?
             File.open('refactor_msg.mqr','w') { |f| f.print msg }
-            try_to "commit -a --file refactor_msg.mqr",'GIT_AUTHOR_DATE' => head_author_date
+            try_to "commit -a --file refactor_msg.mqr",'GIT_AUTHOR_DATE' => "'#{head_author_date}'"
             File.delete 'refactor_msg.mqr'
             successful?
         end
         def run(cmd)
-            `#{set('GIT_AUTHOR_DATE'=>head_author_date)}#{cmd}`
+            `#{set('GIT_AUTHOR_DATE'=>"'#{head_author_date}'")}#{cmd}`
         end
         def modified_files
             `git status`.scan(/^#\s*modified:\s*(.*)/).flatten
