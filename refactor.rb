@@ -520,7 +520,7 @@ commit "Inconsistent indentation and related formatting issues" do
                 \2
         }
         title "If arguments must wrap, treat them all equally"
-        provided { |prefix,arg| prefix !~ / *#/ }
+        provided { |prefix,arg| prefix !~ / *#/ and prefix.balanced_quotes? and arg.balanced_quotes? }
         tests(
             #'     foo.bar(7,' => 
             '     #foo.bar(7,' => :unchanged
