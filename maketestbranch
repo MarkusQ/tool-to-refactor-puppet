@@ -5,12 +5,19 @@ require 'digest/md5'
 module Git
     class << self
         attr_reader :command,:result
-        def try_to(x)
+        def set(vars={})
+            {
+                'GIT_COMMITTER_NAME'  => "'test branch'",
+                'GIT_COMMITTER_EMAIL' => "'puppet-dev@googlegroups.com'",
+                'GIT_COMMITTER_DATE'  => "'1266418253 -0800'"
+            }.update(vars).collect { |x,v| "export #{x}=#{v};" }
+        end
+        def try_to(x,vars={})
             @command = "git #{x}"
             #puts '-'*50,"On #{Git.current_branch}",@command
             #puts caller[0,3]
             #puts "#{Git.current_branch}(#{!!`git log`[/playing with nested scopes/]}): #{@command}"
-            @result  = `export GIT_COMMITTER_NAME='test branch'; export GIT_COMMITTER_EMAIL='puppet-dev@googlegroups.com';export GIT_COMMITTER_DATE="1266418253 -0800"; git #{x} 2>&1`
+            @result  = `#{set(vars)} git #{x} 2>&1`
             #puts `git log | head -n 5`
             #puts "'#{@command}' failed!" unless successful?
             #puts @result
@@ -22,12 +29,18 @@ module Git
         def tracked_files 
             array_from(`git ls-files`)
         end
+        def head_author_date
+            `git log --format="%at" head^..`.chomp
+        end
         def commit(msg,&block)
             yield if block_given?
             File.open('refactor_msg.mqr','w') { |f| f.print msg }
-            try_to "commit -a --file refactor_msg.mqr"
+            try_to "commit -a --file refactor_msg.mqr",'GIT_AUTHOR_DATE' => head_author_date
             File.delete 'refactor_msg.mqr'
             successful?
+        end
+        def run(cmd)
+            `#{set('GIT_AUTHOR_DATE'=>head_author_date)}#{cmd}`
         end
         def modified_files
             `git status`.scan(/^#\s*modified:\s*(.*)/).flatten
@@ -319,7 +332,7 @@ end
                 results << "skipped running #{$1}"
             else
                 head_at_start = Git.current_commit
-                `#{$1}`
+                Git.run $1
                 new_commits = Git.commits_since(head_at_start)
                 results << "ran #{$1}" + 
                     (new_commits.empty? ? '' : (

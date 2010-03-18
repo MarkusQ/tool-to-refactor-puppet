@@ -10,7 +10,7 @@ ethanrowe=git://github.com/ethanrowe/puppet.git
 #
 # Branches to merge into master to produce testing branch
 #
-run specs
+#run specs
 testing #= Branching off master
 markus:refactor/master/scope-v-compiler                                   #= Moving things out of compiler to fix bugs
 ethanrowe:tickets/master/2239                                             #= TERM signal
