@@ -30,7 +30,8 @@ module Git
             array_from(`git ls-files`)
         end
         def head_author_date
-            `git log --format="%at" head^..`.chomp
+            #`git log --format="%at" head^..`.chomp fails if tree messy
+            `git log --format="%at" | head -n 1`.chomp
         end
         def commit(msg,&block)
             yield if block_given?
@@ -311,6 +312,15 @@ end
         puts "There are uncommited modifications in the following files:",
             Git.modified_files,
             "Please resolve (i.e. commit or revert) and try again."
+        abort
+    end
+
+    if File.exists?('.git/rebase-merge')
+        puts "You have unresolved merges in .git/rebase-merge."
+        puts "If you aren't in the middle of a rebase you probably want to either"
+        puts "    git rebase --abort"
+        puts "or, if that doesn't work"
+        puts "    rm -rf .git/rebase-merge"
         abort
     end
 
