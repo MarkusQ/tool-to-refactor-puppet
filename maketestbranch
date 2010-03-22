@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
+$flag = {}
 Git_log = "maketestbranch.#{Time.now.to_i}"
 require 'digest/md5'
 module Git
@@ -14,14 +15,18 @@ module Git
         end
         def try_to(x,vars={})
             @command = "git #{x}"
-            #puts '-'*50,"On #{Git.current_branch}",@command
-            #puts caller[0,3]
+            if $flag['debug']
+                puts '-'*50,"On #{Git.current_branch}",@command
+                puts caller[0,3]
+            end
             #puts "#{Git.current_branch}(#{!!`git log`[/playing with nested scopes/]}): #{@command}"
             @result  = `#{set(vars)} git #{x} 2>&1`
             #puts `git log | head -n 5`
-            #puts "'#{@command}' failed!" unless successful?
-            #puts @result
-            File.open(Git_log,'a') { |f| f.puts @command } if successful? 
+            if $flag['debug']
+                puts "'#{@command}' failed!" unless successful?
+                puts @result
+                File.open(Git_log,'a') { |f| f.puts @command } if successful?
+            end
         end
         def array_from(output) 
             output.split("\n").collect { |l| l.chomp.strip }
@@ -105,6 +110,7 @@ module Git
             when /^error: (.*)$/; "#{@command} --> #{$1}"
             when /^(.*failed.*)/; "#{@command} --> #{$1}"
             when /(Merge conflict in.*)/; "#{@command} -- #{$1}"
+            when /(CONFLICT.*: .*)/; "#{@command} -- #{$1}"
             when /It seems that I cannot create a rebase-apply directory/; @result
             end
         end
@@ -139,12 +145,18 @@ module Resolutions
         end
         def apply_for(file)
             strip_tags_from_markers_in(file)
+            file_contents_with_conflicts = File.read(file)
             delete_patch_temp_files(file)
             Dir[patch_name(file,'*')].sort_by {|patch| patch[/(\d+)\.patch$/,1].to_i }.each { |patch|
                 strip_tags_from_markers_in(patch)
                 #puts [patch,`patch -p 1 < #{patch}`.split("\n"),$CHILD_STATUS].flatten.collect { |l| "        #{l}" }
                 `patch -p 1 < #{patch}`
                 delete_patch_temp_files(file)
+                if Git.conflicts_in?(file)
+                    File.open(file,'w') { |f| f.print file_contents_with_conflicts }
+                else
+                    break
+                end
             }
             %q{
                 merge-conflict/resolutions/spec-unit-util-rdoc-parser.rb/1.patch
@@ -214,15 +226,19 @@ module Resolutions
             @@branches_seen.each { |other_branch|
                 patches = [@@fixups["#{branch} and #{other_branch}"],@@fixups["#{other_branch} and #{branch}"]].compact.join("\n")
                 unless patches.empty?
-                    patches.scan(/^(diff.*)^end-diff$/m).flatten.each { |patch|
-                        file = patch[/ a\/(.*rb) /,1]
-                        delete_patch_temp_files(file)
-                        File.open('temp-fixup.patch','w') { |f| f.print patch }
-                        `patch -p 1 < temp-fixup.patch`
-                        delete_patch_temp_files(file)
-                        Git.add(file)
+                    patches.scan(/^(diff.*?)^end-diff$/m).flatten.each { |patch|
+                        file = patch[/ a\/(.*r[ab]) /,1]
+                        if file
+                            delete_patch_temp_files(file)
+                            File.open('temp-fixup.patch','w') { |f| f.print patch }
+                            `patch -p 1 < temp-fixup.patch`
+                            delete_patch_temp_files(file)
+                            Git.add(file)
+                        else
+                            puts "Mailformed patch (diff line bad) for #{branch}/#{other_branch}"
+                        end
                     }
-                    Git.commit("Resolving conflicts between #{branch} and #{other_branch}")
+                    Git.commit("Resolving conflicts with #{other_branch}\n\n#{patches}".gsub(/^diff.*?^end-diff$/m,"").gsub(/\n\n+/,"\n\n"))
                 end
             }
             @@branches_seen << branch
@@ -314,7 +330,6 @@ end
             "Please resolve (i.e. commit or revert) and try again."
         abort
     end
-
     if File.exists?('.git/rebase-merge')
         puts "You have unresolved merges in .git/rebase-merge."
         puts "If you aren't in the middle of a rebase you probably want to either"
@@ -328,10 +343,24 @@ end
     Git.checkout('testing','master')
     results = []
     conflicts = []
-    run_specs = skip_rest = false
+    skip_rest = false
     prior_spec_results = {}
     $head_of_master = Git.current_commit
     File.readlines(test_series).each do |line|
+        unless Git.modified_files.empty?
+            puts "There are uncommited modifications in the following files:",
+                Git.modified_files,
+                "Please resolve (i.e. commit or revert) and try again."
+            abort
+        end
+        if File.exists?('.git/rebase-merge')
+            puts "You have unresolved merges in .git/rebase-merge."
+            puts "If you aren't in the middle of a rebase you probably want to either"
+            puts "    git rebase --abort"
+            puts "or, if that doesn't work"
+            puts "    rm -rf .git/rebase-merge"
+            abort
+        end
         Git.checkout('testing')
         branch_desc = line[/#= *(.*?)(;|$)/,1]
         line = line.chomp.gsub(/#.*$/,'').strip # ignore trailing spaces, "\n", '#' comments
@@ -347,14 +376,14 @@ end
                 results << "ran #{$1}" + 
                     (new_commits.empty? ? '' : (
                     ":\n    * "+new_commits.reverse.join("\n    * ")+
-                    (run_specs ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
+                    ($flag['specs'] ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
                     ))
             end
         when /(\w+)\s*=\s*(.+)/
             sources[$1] = $2
             # markus= git@github.com:MarkusQ/puppet.git
         when /^ *skip *rest/; skip_rest = true
-        when /^ *run *specs/; run_specs = true
+        when /^([a-z]+) +(on|off) *$/; $flag[$1] = ($2 == 'on')
         else
             branch_to_merge,first_commit = (line =~ /(.*) *from *([0-9a-f]+)/) ? [$1,$2] : [line,nil]
             try_to_recover = branch_to_merge.gsub!(/^~/,'')
@@ -378,7 +407,7 @@ end
                                     #puts "Looking for resolultions to conflict(s) in #{file}"
                                     Resolutions.apply_for(file)
                                     if file == 'lib/puppet/parser/parser.rb'
-                                        `cd lib/puppet/parser; racc grammar.ra -o parser.rb`
+                                        `cd lib/puppet/parser; racc grammar.ra -o parser.rb 2>/dev/null`
                                     end
                                     if Git.conflicts_in?(file)
                                         all_better = false
@@ -420,7 +449,7 @@ end
                     Git.delete_branch('testing') and Git.rename_branch('testing-temp','testing') or fail Git.error_message
                     result += ":\n    * "+Git.commits_since(head_at_start).reverse.collect {|x| x[0,75] + ((x.length>75)? '...':'') }.join("\n    * ")+
                         (skipped_commits.empty? ? '' : ["\n  ..skipped",skipped_commits].flatten.join("\n    "))+
-                        (run_specs ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
+                        ($flag['specs'] ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
                 rescue => e
                     how_far_we_got = "\n    x "+Git.commits_since(head_at_start).reverse.join("\n    x ")
                     Git.abort_rebase_to('testing')
