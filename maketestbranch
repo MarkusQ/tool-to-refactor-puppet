@@ -226,7 +226,7 @@ module Resolutions
             @@branches_seen.each { |other_branch|
                 patches = [@@fixups["#{branch} and #{other_branch}"],@@fixups["#{other_branch} and #{branch}"]].compact.join("\n")
                 unless patches.empty?
-                    patches.scan(/^(diff.*?)^end-diff$/m).flatten.each { |patch|
+                    patches.scan(/^(diff.*?)^end-diff *$/m).flatten.each { |patch|
                         file = patch[/ a\/(.*r[ab]) /,1]
                         if file
                             delete_patch_temp_files(file)
@@ -238,7 +238,7 @@ module Resolutions
                             puts "Mailformed patch (diff line bad) for #{branch}/#{other_branch}"
                         end
                     }
-                    Git.commit("Resolving conflicts with #{other_branch}\n\n#{patches}".gsub(/^diff.*?^end-diff$/m,"").gsub(/\n\n+/,"\n\n"))
+                    Git.commit("Resolving conflicts with #{other_branch}\n\n#{patches}".gsub(/^diff.*?^end-diff *$/m,"").gsub(/\n\n+/,"\n\n"))
                 end
             }
             @@branches_seen << branch
@@ -319,6 +319,8 @@ def try_to_rebase(sources,branch_to_merge,first_commit)
     end
 end
 
+    trap(:INT) { p "(stopping)"; $term = true }; $term = false;
+
     #test_series = %x{git config --get puppet.testseriesfile}.chomp
     #test_series = '.testseries' if test_series.empty?
     test_series = '../refactor/.testseries'
@@ -347,6 +349,7 @@ end
     prior_spec_results = {}
     $head_of_master = Git.current_commit
     File.readlines(test_series).each do |line|
+        abort if $term
         unless Git.modified_files.empty?
             puts "There are uncommited modifications in the following files:",
                 Git.modified_files,
@@ -466,5 +469,4 @@ end
         puts results
         results = []
     end
-    #puts results
 

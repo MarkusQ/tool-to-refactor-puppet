@@ -7,36 +7,33 @@ jesse=git://github.com/jes5199/puppet.git
 brice=git://github.com/masterzen/puppet.git
 andrew=git://github.com/ajf/puppet.git
 ethanrowe=git://github.com/ethanrowe/puppet.git
+martin=git://github.com/pmenglund/puppet.git
 #
 # Branches to merge into master to produce testing branch
 #
-specs on
+#specs on
 testing #= Branching off master
-jesse:master_spec_fixes
-reinh:tickets/master/3392-rm-puppetmasterd-spec                           #= rm puppetmasterd spec
-markus:refactor/master/scope-v-compiler                                   #= Moving things out of compiler to fix bugs
-jesse:ticket/master/3148                                                  #= Bug fixes
-andrew:ticket/0.25.x/2805                                                 #= AIX support
-bkearney:ticket/0.25.x/3379 from a1d216c74ee7245e0edaaba7d9384b59d442bcf2 #= augeas fix
-brice:tickets/0.25.x/3186                                                 #= Trees of requires
-brice:tickets/0.25.x/2929                                                 #= checksum => none
-brice:tickets/testing/2389  from c68d84b1c375831fb16648fb07b9d38f8bdaf96b #= Hashes
-# -----------
-ethanrowe:tickets/master/2239                                             #= TERM signal
+
+bkearney:ticket/0.25.x/3387                                               #= Backslashes in augeas
 luke:tickets/master/2759                                                  #= Events
-markus:ticket/master/3225 from 221c5cecbc3ebf1e279f1d907993e9350c66dfe0   #= Fix for minor bug in luke:tickets/master/2759
+ethanrowe:tickets/master/2239                                             #= TERM signal
+martin:tickets/0.25.x/3412                                                #= . is not a tempdir
+martin:tickets/0.25.x/3399                                                #= zone type should handle exclusive IP stacks
+markus:ticket/master/3113                                                 #= Wait for smf status change
+markus:ticket/0.25.x/2604                                                 #= ZAML
+#markus:ticket/master/3225 from 221c5cecbc3ebf1e279f1d907993e9350c66dfe0   #= Fix for minor bug in luke:tickets/master/2759
 brice:tickets/0.25.x/3396                                                 #= Faster event propagation
 luke:tickets/master/3015                                                  #= Per Environment known resource types
 luke:tickets/master/1943                                                  #= Combine yaml & file termini
-#brice:tickets/testing/2389  from c68d84b1c375831fb16648fb07b9d38f8bdaf96b #= Hashes
-luke:tickets/testing/2954   from 9b15984c199c81ffb2aac8a1aae4996a2cbde315 #= Class parameters; depends on 3015
-markus:feature/testing/2956 from 2c40ed8d2ebc1c45df243c118f17c91e88131494 #= Futures
-markus:refactor/master/3216                                               #= String interpolation
-jesse:feature/master/3394                                                 #= REST (3115,3347,3383,3394)
 brice:tickets/0.25.x/3229                                                 #= regex case sensitivity
+jesse:feature/master/3394                                                 #= REST (3115,3347,3383,3394)
 andrew:feature/0.25.x/zypper                                              #= zypper for OpenSuSE
+luke:tickets/testing/2954   from 9b15984c199c81ffb2aac8a1aae4996a2cbde315 #= Class parameters; depends on 3015
+#markus:feature/testing/2956 from 2c40ed8d2ebc1c45df243c118f17c91e88131494 #= Futures
+markus:refactor/master/3216                                               #= String interpolation
 luke:tickets/master/3096    from b92f3175a885bda49b86aed1d32b9d6466360bcf #= internal DSL
 luke:tickets/master/3398                                                  #= Checksum parameter
+
 skip rest
 !ruby ../refactor/refactor.rb
 
@@ -56,27 +53,4 @@ skip rest
 !ruby ../refactor/refactor.rb "Don't restate results directly after assignment"
 !ruby ../refactor/refactor.rb 'Avoid needless decorations'
 !ruby ../refactor/refactor.rb 'Two space indentation'
-#
-# Branches that we may want to merge 
-#
-skip rest
-#
-# Markus -------------------------------
-
-# Luke --------------------------------
-# 
-#  Need a ticket or remove from list
-#
-luke:feature/master/1481-tmp
-#luke:feature/master/2276
-luke:feature/master/event_manager
-luke:feature/event_manager/resource_harness
-luke:feature/event_manager/rollback
-luke:feature/master/push_tarball
-luke:feature/master/single_executable
-luke:features/master/hash2resources
-#luke:refactor/master/extracted_definedtype
-luke:refactor/master/graph_shadowing
-luke:refactor/master/no_relationship_graph
-#
 

@@ -151,6 +151,7 @@ class A_replacement < A_container
         #            with { |indent,var,exp1,use,exp2| use+(exp1.term+'||'+exp2.term).exp }
         #     but we still have to parse the contents over and over.
         #            with { |indent,var,exp1,use,exp2| use+[exp1.term,'||',exp2.term].exp }    
+        #            with { |indent,var,exp1,use,exp2| _(use,_(exp1,'||',exp2)) }    
     end
     def with(*args,&block)
         #p args
