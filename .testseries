@@ -15,6 +15,7 @@ specs on
 unit-tests on
 testing #= Branching off master
 
+jesse:ticket/0.25.x/3424                                                  #= Unit test fixes
 bkearney:ticket/0.25.x/3387                                               #= Backslashes in augeas
 luke:tickets/master/2759                                                  #= Events
 ethanrowe:tickets/master/2239                                             #= TERM signal
@@ -22,6 +23,7 @@ martin:tickets/0.25.x/3412                                                #= . i
 martin:tickets/0.25.x/3399                                                #= zone type should handle exclusive IP stacks
 markus:ticket/master/3113                                                 #= Wait for smf status change
 markus:ticket/master/2604                                                 #= ZAML
+markus:ticket/0.25.x/3424                                                 #= ZAML patch
 markus:ticket/0.25.x/3366                                                 #= bool settings fix
 
 #* #3155; Brice, Overwriting ephemeral values [absent from testing/master]

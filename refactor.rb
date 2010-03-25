@@ -158,7 +158,7 @@ class A_replacement < A_container
     $LOAD_PATH << "../refactor" << "../refactor/lib"
     require "ruby_parser"
     def parse(*cs)
-        result = ($parser ||= RubyParser.new).process cs.flatten.join rescue nil
+        result = begin ($parser ||= RubyParser.new).process cs.flatten.join; rescue Object; nil; end
         print "#{cs}  -->  #{result}\n" if $echo
         result
     end
@@ -193,6 +193,7 @@ class A_replacement < A_container
         fail "Can't have more than one replacement" if @replacement
         @replacement_description ||= [args.last].join
         @_replacement = args.first
+        @_replacement = @_replacement.split(/(\^\d+)/).collect { |s| s.sub(/\^(\d+)/,"\\"+'\1') } if @_replacement =~ /\^\d/
         #@replacement = block || lambda { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { "#{$1}#{s[$2.to_i-1]}" } }
         @replacement = block || lambda { |*s| concat_code(replace_in_tree(s,@_replacement)) }
     end
@@ -331,17 +332,16 @@ class A_consecutive_line_replacement < A_replacement
             join('\n\1')
         super /^( *)#{s}/,desc
     end
-    def with(rep=nil,desc=nil,&block)
+    def mungle(rep,*prefix)
         case rep
-        when nil
-            super rep,desc,&block
-        when Array
-            super(['\0']+rep.collect { |x| x.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0")},rep)
-        else
-            super('\0'+rep.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0"),rep)
-            #super('\0'+rep.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0"),rep) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d+)/) { $1+s[$2.to_i] } }
-            #super('\0'+rep.gsub(/\\n/,"\n\\\\0"),string) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { $1+s[$2.to_i] } }
+        when nil;   rep
+        when Array; prefix+rep.collect { |x| mungle(x) }
+        else        prefix.join+rep.gsub(/\n+/,"\n\\\\0")
         end
+    end
+    def with(rep=nil,desc=nil,&block)
+        rep = rep.remove_leading_and_trailing_blank_lines.deindented if rep.is_a? String
+        super mungle(rep,'\0'),desc,&block
     end
 end
 
@@ -688,7 +688,7 @@ commit "Use string interpolation" do
         with ' {\1}'
     }
     replace_terms {
-        like '"([^"\n]*%s[^"\n]*)" *% *(.+?)(?=$| *\b(do|if|while|until|unless)\b)'
+        like '"([^"\n]*%s[^"\n]*)" *% *(.+?)(?=$| *\b(do|if|while|until|unless|#)\b)'
         with { |format,args| '"'+@parsed_format.zip(@parsed_args.collect {|a| '#{'+a.strip.sub(/\.to_s$/,'')+'}'}+[nil]).flatten.compact.join+'"'+@post }
         provided { |format,args|
             #p [format,args]
@@ -732,7 +732,8 @@ commit "Use string interpolation" do
             '@cs = ("{#{@cst}}") + send("%s_file" % @cst, rp).to_s'     => '@cs = ("{#{@cst}}") + send("#{@cst}_file", rp).to_s',
             'foo "stuff % bar" % list.collect { |x|'                    => :unchanged,
             '"Could not find %s for overriding" % list.collect { |o|'   => :unchanged,
-            'info "facts %s" % [::File.basename(file.sub(".rb",""))]'   => 'info "facts #{::File.basename(file.sub(".rb",""))}"'
+            'info "facts %s" % [::File.basename(file.sub(".rb",""))]'   => 'info "facts #{::File.basename(file.sub(".rb",""))}"',
+            '"Foo %s" % name # use Foo a la #375'                       => '"Foo #{name}" # use Foo a la #375'
 
        )
         # For why we use % interpolation, see:
@@ -790,7 +791,7 @@ end
 
 commit "Booleans are first class values." do
     #validate_each_file { s = `spec spec/unit/parser/resource.rb 2>&1`; puts s; s =~ / 0 failures/ } 
-    replace_consecutive_lines {  skip!
+    replace_consecutive_lines {
         like %q{
             def (.*)
                 begin
@@ -812,7 +813,7 @@ commit "Booleans are first class values." do
             end
         }
     }
-    replace_consecutive_lines {  skip!
+    replace_consecutive_lines {
         like %q{
             return (.*?) if (.*)
             return (.*)
@@ -833,9 +834,9 @@ commit "Booleans are first class values." do
                 \2true
             end
         }
-        with ['\2','!','\1']
+        with '\2!^1'
     }
-    replace_consecutive_lines {  skip!
+    replace_consecutive_lines {
         like %q{
             if (.*)
                 (.*[^:])true
@@ -843,9 +844,9 @@ commit "Booleans are first class values." do
                 \2false
             end
         }
-        with '\2!!(\1)'
+        with '\2!!^1'
     }
-    replace_consecutive_lines {  skip!
+    replace_consecutive_lines {
         like %q{
             if ([a-z_]) = (.*)
                 (.*[^:])\1
@@ -853,10 +854,10 @@ commit "Booleans are first class values." do
                 \3(.*)
             end
         }
-        with '\3((\2)||(\4))'
+        with ['\3',['\2','||','\4']]
         provided { |indent,var,exp1,use,exp2| exp1 !~ / and | or |\|\||&&/ }
     }
-    replace_consecutive_lines {  skip!
+    replace_consecutive_lines {
         like %q{
             if (.*)
                 (.*[^:])\1
@@ -864,9 +865,9 @@ commit "Booleans are first class values." do
                 \2false
             end
         }
-        with '\2(\1)'
+        with ['\2','\1']
     }
-    replace_consecutive_lines {  skip!
+    replace_consecutive_lines {
         like %q{
             if (.*)
                 (.*[^:])(.*)
@@ -874,9 +875,9 @@ commit "Booleans are first class values." do
                 \2false
             end
         }
-        with '\2(\1) && (\3)'
+        with ['\2',['\1','     &&     ','\3']]
     }
-    replace_consecutive_lines {  skip!
+    replace_consecutive_lines {
         like %q{
             if (.*)
                 (.*[^:])nil
@@ -884,9 +885,9 @@ commit "Booleans are first class values." do
                 \2(true)
             end
         }
-        with '\2(\1)||nil'
+        with ['\2',['\1','||','nil']]
     }
-    replace_consecutive_lines {  skip!
+    replace_consecutive_lines {
         like %q{
             if (.*)
                 (.*[^:])true
@@ -894,9 +895,9 @@ commit "Booleans are first class values." do
                 \2nil
             end
         }
-        with '\2(\1)||nil'
+        with ['\2',['\1','||','nil']]
     }
-    replace_consecutive_lines {  skip!
+    replace_consecutive_lines {
         like %q{
             if (.*)
                 (.*[^:])\1
@@ -904,9 +905,9 @@ commit "Booleans are first class values." do
                 \2nil
             end
         }
-        with '\2(\1)||nil'
+        with ['\2',['\1','||','nil']]
     }
-    replace_consecutive_lines {  skip!
+    replace_consecutive_lines {
         like %q{
             if (.*)
                 (.*[^:])(.*)
@@ -914,7 +915,14 @@ commit "Booleans are first class values." do
                 \2nil
             end
         }
-        with '\2((\1) && (\3))||nil'
+        #with ['\2',[['\1','&&','\3']'||','nil']],
+        #tests(
+        #    "    if bob\n        sam = foo\n    else        sam = nil\n    end" => "    sam = (bob && foo) || nil"
+        #)
+        with ['\2',['\1','?','\3',':','nil']]
+     #   tests(
+     #       "    if bob\n        sam = foo\n    else        sam = nil\n    end\n" => "    sam = bob ? foo : nil"
+     #   )
     }
     # TODO:
     # def found_file?(path, type = nil)
@@ -957,7 +965,21 @@ commit "Booleans are first class values." do
     #        return false
     #      end
     #
-   
+    #
+    #-        return true if [:class, :node].include?(name)
+    #-        return true if Puppet::Type.type(name)
+    #-        return true if known_resource_types.definition(name)
+    #-        return false
+    #+        if [:class, :node].include?(name)
+    #+            return true
+    #+        else
+    #+            return true if Puppet::Type.type(name)
+    #+        end
+    #+        return !!(known_resource_types.definition(name))
+    #
+    # Should be something like:
+    #        return [:class, :node].include?(name) || !!Puppet::Type.type(name) || !!known_resource_types.definition(name)
+    # 
 end
 
 commit "Avoid explicit returns" do
