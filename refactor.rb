@@ -119,6 +119,7 @@ class A_replacement < A_container
         @count = 0
         @examples = []
         @reasons_to_skip = []
+        @hidden_patterns = 0
         @skipped_files = []
         super(*args,&block)
     end
@@ -153,12 +154,47 @@ class A_replacement < A_container
         #            with { |indent,var,exp1,use,exp2| use+[exp1.term,'||',exp2.term].exp }    
         #            with { |indent,var,exp1,use,exp2| _(use,_(exp1,'||',exp2)) }    
     end
+    require "rubygems"
+    $LOAD_PATH << "../refactor" << "../refactor/lib"
+    require "ruby_parser"
+    def parse(*cs)
+        result = ($parser ||= RubyParser.new).process cs.flatten.join rescue nil
+        print "#{cs}  -->  #{result}\n" if $echo
+        result
+    end
+    def concat_code(*cs)
+        #$echo = cs.join.include? '>'
+        pcs = {}
+        cs = cs.collect { |c| (c.is_a? Array) ? concat_code(*c) : c }
+        cs.each { |c| pcs[c] = parse c }
+        safe_cs = cs.collect { |c| (c =~ /^ *[a-z0-9]+ $/) ? c : pcs[c] ? "(#{c})" : c }
+        target = parse safe_cs
+        all_cs = 0...cs.length
+        all_cs.each { |i|
+            # if its a parsable entity and we get a different result omiting the parins, keep them
+            if pcs[cs[i]] and parse(all_cs.collect { |j| (j<=i)? cs[j] : safe_cs[j] } ) != target
+                cs[i] = safe_cs[i]
+            end
+        }
+        STDIN.readline if $echo
+        cs.join
+    end
+    def replace_in_tree(s,*t)
+        t.collect { |x|
+            if x.is_a? Array
+                replace_in_tree(s,*x)
+            else
+                x.gsub(/(\G|[^\\])[\\$](\d)/) { "#{$1}#{s[$2.to_i-1+@hidden_patterns]}" }
+            end
+        }
+    end
     def with(*args,&block)
         #p args
         fail "Can't have more than one replacement" if @replacement
-        @replacement_description ||= args.last
+        @replacement_description ||= [args.last].join
         @_replacement = args.first
-        @replacement = block || lambda { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { "#{$1}#{s[$2.to_i-1]}" } }
+        #@replacement = block || lambda { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { "#{$1}#{s[$2.to_i-1]}" } }
+        @replacement = block || lambda { |*s| concat_code(replace_in_tree(s,@_replacement)) }
     end
     def provided(&block)
         @conditions << block
@@ -282,6 +318,10 @@ class A_line_replacement < A_replacement
 end
 
 class A_consecutive_line_replacement < A_replacement
+    def initialize(*args,&block)
+        super
+        @hidden_patterns += 1
+    end
     def like(s,desc=nil)
         s = s.remove_leading_and_trailing_blank_lines.deindented
         desc ||= s
@@ -291,12 +331,16 @@ class A_consecutive_line_replacement < A_replacement
             join('\n\1')
         super /^( *)#{s}/,desc
     end
-    def with(string=nil,desc=nil,&block)
-        if string
-            super('\0'+string.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0"),string) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d+)/) { $1+s[$2.to_i] } }
-            #super('\0'+string.gsub(/\\n/,"\n\\\\0"),string) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { $1+s[$2.to_i] } }
+    def with(rep=nil,desc=nil,&block)
+        case rep
+        when nil
+            super rep,desc,&block
+        when Array
+            super(['\0']+rep.collect { |x| x.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0")},rep)
         else
-            super string,desc,&block
+            super('\0'+rep.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0"),rep)
+            #super('\0'+rep.remove_leading_and_trailing_blank_lines.deindented.gsub(/\n+/,"\n\\\\0"),rep) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d+)/) { $1+s[$2.to_i] } }
+            #super('\0'+rep.gsub(/\\n/,"\n\\\\0"),string) { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { $1+s[$2.to_i] } }
         end
     end
 end
@@ -746,7 +790,7 @@ end
 
 commit "Booleans are first class values." do
     #validate_each_file { s = `spec spec/unit/parser/resource.rb 2>&1`; puts s; s =~ / 0 failures/ } 
-    replace_consecutive_lines {
+    replace_consecutive_lines {  skip!
         like %q{
             def (.*)
                 begin
@@ -768,7 +812,7 @@ commit "Booleans are first class values." do
             end
         }
     }
-    replace_consecutive_lines {
+    replace_consecutive_lines {  skip!
         like %q{
             return (.*?) if (.*)
             return (.*)
@@ -789,9 +833,9 @@ commit "Booleans are first class values." do
                 \2true
             end
         }
-        with '\2!(\1)'
+        with ['\2','!','\1']
     }
-    replace_consecutive_lines {
+    replace_consecutive_lines {  skip!
         like %q{
             if (.*)
                 (.*[^:])true
@@ -801,7 +845,7 @@ commit "Booleans are first class values." do
         }
         with '\2!!(\1)'
     }
-    replace_consecutive_lines {
+    replace_consecutive_lines {  skip!
         like %q{
             if ([a-z_]) = (.*)
                 (.*[^:])\1
@@ -812,7 +856,7 @@ commit "Booleans are first class values." do
         with '\3((\2)||(\4))'
         provided { |indent,var,exp1,use,exp2| exp1 !~ / and | or |\|\||&&/ }
     }
-    replace_consecutive_lines {
+    replace_consecutive_lines {  skip!
         like %q{
             if (.*)
                 (.*[^:])\1
@@ -822,7 +866,7 @@ commit "Booleans are first class values." do
         }
         with '\2(\1)'
     }
-    replace_consecutive_lines {
+    replace_consecutive_lines {  skip!
         like %q{
             if (.*)
                 (.*[^:])(.*)
@@ -832,7 +876,7 @@ commit "Booleans are first class values." do
         }
         with '\2(\1) && (\3)'
     }
-    replace_consecutive_lines {
+    replace_consecutive_lines {  skip!
         like %q{
             if (.*)
                 (.*[^:])nil
@@ -842,7 +886,7 @@ commit "Booleans are first class values." do
         }
         with '\2(\1)||nil'
     }
-    replace_consecutive_lines {
+    replace_consecutive_lines {  skip!
         like %q{
             if (.*)
                 (.*[^:])true
@@ -852,7 +896,7 @@ commit "Booleans are first class values." do
         }
         with '\2(\1)||nil'
     }
-    replace_consecutive_lines {
+    replace_consecutive_lines {  skip!
         like %q{
             if (.*)
                 (.*[^:])\1
@@ -862,7 +906,7 @@ commit "Booleans are first class values." do
         }
         with '\2(\1)||nil'
     }
-    replace_consecutive_lines {
+    replace_consecutive_lines {  skip!
         like %q{
             if (.*)
                 (.*[^:])(.*)

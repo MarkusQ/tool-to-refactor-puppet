@@ -301,6 +301,17 @@ module Spec_test
     at_exit { File.open(Result_cache,'w') { |f| YAML.dump(Results,f)} }
 end
 
+
+module Unit_test
+    require 'yaml'
+    Result_cache = '../refactor/unit_test_results'
+    Results = Hash.new { |h,commit| 
+        h[commit] = `sudo rake unit 2>&1`.split("\n").grep(/\d+ tests, \d+ assertions/)
+    }
+    Results.update(YAML.load_file(Result_cache)) rescue nil
+    at_exit { File.open(Result_cache,'w') { |f| YAML.dump(Results,f)} }
+end
+
 def try_to_rebase(sources,branch_to_merge,first_commit)
     if branch_to_merge =~ /(\w+)\s*:\s*(\S+)/
         # It's a remote branch; fetch it as testing-temp
@@ -379,14 +390,15 @@ end
                 results << "ran #{$1}" + 
                     (new_commits.empty? ? '' : (
                     ":\n    * "+new_commits.reverse.join("\n    * ")+
-                    ($flag['specs'] ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
+                    ($flag['specs'] ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')+
+                    ($flag['unit-tests'] ? "\n    #{Unit_test::Results[Git.current_commit]}" : '')
                     ))
             end
         when /(\w+)\s*=\s*(.+)/
             sources[$1] = $2
             # markus= git@github.com:MarkusQ/puppet.git
         when /^ *skip *rest/; skip_rest = true
-        when /^([a-z]+) +(on|off) *$/; $flag[$1] = ($2 == 'on')
+        when /^([-a-z]+) +(on|off) *$/; $flag[$1] = ($2 == 'on')
         else
             branch_to_merge,first_commit = (line =~ /(.*) *from *([0-9a-f]+)/) ? [$1,$2] : [line,nil]
             try_to_recover = branch_to_merge.gsub!(/^~/,'')
@@ -452,7 +464,8 @@ end
                     Git.delete_branch('testing') and Git.rename_branch('testing-temp','testing') or fail Git.error_message
                     result += ":\n    * "+Git.commits_since(head_at_start).reverse.collect {|x| x[0,75] + ((x.length>75)? '...':'') }.join("\n    * ")+
                         (skipped_commits.empty? ? '' : ["\n  ..skipped",skipped_commits].flatten.join("\n    "))+
-                        ($flag['specs'] ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
+                        ($flag['specs'] ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')+
+                        ($flag['unit-tests'] ? "\n    #{Unit_test::Results[Git.current_commit]}" : '')
                 rescue => e
                     how_far_we_got = "\n    x "+Git.commits_since(head_at_start).reverse.join("\n    x ")
                     Git.abort_rebase_to('testing')

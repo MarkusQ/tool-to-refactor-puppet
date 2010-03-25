@@ -11,7 +11,8 @@ martin=git://github.com/pmenglund/puppet.git
 #
 # Branches to merge into master to produce testing branch
 #
-#specs on
+specs on
+unit-tests on
 testing #= Branching off master
 
 bkearney:ticket/0.25.x/3387                                               #= Backslashes in augeas
@@ -20,7 +21,10 @@ ethanrowe:tickets/master/2239                                             #= TER
 martin:tickets/0.25.x/3412                                                #= . is not a tempdir
 martin:tickets/0.25.x/3399                                                #= zone type should handle exclusive IP stacks
 markus:ticket/master/3113                                                 #= Wait for smf status change
-markus:ticket/0.25.x/2604                                                 #= ZAML
+markus:ticket/master/2604                                                 #= ZAML
+markus:ticket/0.25.x/3366                                                 #= bool settings fix
+
+#* #3155; Brice, Overwriting ephemeral values [absent from testing/master]
 #markus:ticket/master/3225 from 221c5cecbc3ebf1e279f1d907993e9350c66dfe0   #= Fix for minor bug in luke:tickets/master/2759
 brice:tickets/0.25.x/3396                                                 #= Faster event propagation
 luke:tickets/master/3015                                                  #= Per Environment known resource types
@@ -34,7 +38,7 @@ markus:refactor/master/3216                                               #= Str
 luke:tickets/master/3096    from b92f3175a885bda49b86aed1d32b9d6466360bcf #= internal DSL
 luke:tickets/master/3398                                                  #= Checksum parameter
 
-skip rest
+#skip rest
 !ruby ../refactor/refactor.rb
 
 skip rest
