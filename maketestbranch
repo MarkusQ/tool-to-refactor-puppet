@@ -331,6 +331,14 @@ module Unit_test
     at_exit { File.open(Result_cache,'w') { |f| YAML.dump(Results,f)} }
 end
 
+def go_to_testing
+    unless $root_of_testing
+        Git.checkout('testing',$start_at || 'master')
+        $root_of_testing = Git.current_commit
+    end
+    Git.checkout('testing')
+end
+
 def try_to_rebase(sources,branch_to_merge,first_commit)
     if branch_to_merge =~ /(\w+)\s*:\s*(\S+)/
         # It's a remote branch; fetch it as testing-temp
@@ -342,8 +350,8 @@ def try_to_rebase(sources,branch_to_merge,first_commit)
     if first_commit
         fail "#{first_commit} not found" unless Git.show(first_commit)
         Git.rebase('-m','--onto testing',first_commit+'^','testing-temp')
-    elsif Git.show($head_of_master)
-        Git.rebase('-m','--onto testing',$head_of_master,'testing-temp')
+    elsif Git.show($root_of_testing)
+        Git.rebase('-m','--onto testing',$root_of_testing,'testing-temp')
     else
        Git.rebase('-m','testing','testing-temp')
     end
@@ -372,12 +380,9 @@ end
     end
 
     Resolutions.look_for_new
-    Git.checkout('testing','master')
     results = []
     conflicts = []
-    skip_rest = false
     prior_spec_results = {}
-    $head_of_master = Git.current_commit
     File.readlines(test_series).each do |line|
         abort if $term
         unless Git.modified_files.empty?
@@ -394,15 +399,15 @@ end
             puts "    rm -rf .git/rebase-merge"
             abort
         end
-        Git.checkout('testing')
         branch_desc = line[/#= *(.*?)(;|$)/,1]
         line = line.chomp.gsub(/#.*$/,'').strip # ignore trailing spaces, "\n", '#' comments
         case line
         when /^\s*$/ # ignore blank lines
         when /^!(.*)/
-            if skip_rest
+            if $flag['skipping']
                 results << "skipped running #{$1}"
             else
+                go_to_testing
                 head_at_start = Git.current_commit
                 Git.run $1
                 new_commits = Git.commits_since(head_at_start)
@@ -416,13 +421,18 @@ end
         when /(\w+)\s*=\s*(.+)/
             sources[$1] = $2
             # markus= git@github.com:MarkusQ/puppet.git
-        when /^ *skip *rest/; skip_rest = true
         when /^([-a-z]+) +(on|off) *$/; $flag[$1] = ($2 == 'on')
+        when /^(start|stop) +([-a-z]+) *$/; $flag[$2] = ($1 == 'start')
+        when /^start +at +(.*)/
+            fail "You can't specify where to start after you've started." if $root_of_testing
+            fail "You can only specify one place to start." if $start_at
+            $start_at = $1
         else
+            go_to_testing
             branch_to_merge,first_commit = (line =~ /(.*) *from *([0-9a-f]+)/) ? [$1,$2] : [line,nil]
             try_to_recover = branch_to_merge.gsub!(/^~/,'')
             result = ''
-            if skip_rest
+            if $flag['skipping']
                 result = 'skipped'
             else
                 begin
