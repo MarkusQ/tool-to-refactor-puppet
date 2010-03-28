@@ -15,7 +15,9 @@ specs on
 unit-tests on
 testing #= Branching off master
 
-jesse:ticket/0.25.x/3424                                                  #= Unit test fixes
+jesse:ticket/0.25.x/3423 from fe19524a01c152f4b8b57cd43787319ba12041df    #= Unit test fixes
+jesse:repairs/master/test-unit-tests                                      #= More unit test fixes
+
 bkearney:ticket/0.25.x/3387                                               #= Backslashes in augeas
 luke:tickets/master/2759                                                  #= Events
 ethanrowe:tickets/master/2239                                             #= TERM signal
@@ -23,7 +25,7 @@ martin:tickets/0.25.x/3412                                                #= . i
 martin:tickets/0.25.x/3399                                                #= zone type should handle exclusive IP stacks
 markus:ticket/master/3113                                                 #= Wait for smf status change
 markus:ticket/master/2604                                                 #= ZAML
-markus:ticket/0.25.x/3424                                                 #= ZAML patch
+markus:ticket/0.25.x/3424 from 2defc009f0403953a8ebcdb5f34b459921428eb2   #= ZAML patch
 markus:ticket/0.25.x/3366                                                 #= bool settings fix
 
 #* #3155; Brice, Overwriting ephemeral values [absent from testing/master]
@@ -41,9 +43,9 @@ luke:tickets/master/3096    from b92f3175a885bda49b86aed1d32b9d6466360bcf #= int
 luke:tickets/master/3398                                                  #= Checksum parameter
 
 #skip rest
-!ruby ../refactor/refactor.rb
+#!ruby ../refactor/refactor.rb
 
-skip rest
+#skip rest
 !ruby ../refactor/refactor.rb 'Miscellaneous oddity removal'
 !ruby ../refactor/refactor.rb 'Inconsistent indentation and related formatting issues'
 !ruby ../refactor/refactor.rb 'Use {} for % notation delimiters wherever practical'

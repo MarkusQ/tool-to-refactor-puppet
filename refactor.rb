@@ -157,28 +157,6 @@ class A_replacement < A_container
     require "rubygems"
     $LOAD_PATH << "../refactor" << "../refactor/lib"
     require "ruby_parser"
-    def parse(*cs)
-        result = begin ($parser ||= RubyParser.new).process cs.flatten.join; rescue Object; nil; end
-        print "#{cs}  -->  #{result}\n" if $echo
-        result
-    end
-    def concat_code(*cs)
-        #$echo = cs.join.include? '>'
-        pcs = {}
-        cs = cs.collect { |c| (c.is_a? Array) ? concat_code(*c) : c }
-        cs.each { |c| pcs[c] = parse c }
-        safe_cs = cs.collect { |c| (c =~ /^ *[a-z0-9]+ $/) ? c : pcs[c] ? "(#{c})" : c }
-        target = parse safe_cs
-        all_cs = 0...cs.length
-        all_cs.each { |i|
-            # if its a parsable entity and we get a different result omiting the parins, keep them
-            if pcs[cs[i]] and parse(all_cs.collect { |j| (j<=i)? cs[j] : safe_cs[j] } ) != target
-                cs[i] = safe_cs[i]
-            end
-        }
-        STDIN.readline if $echo
-        cs.join
-    end
     def replace_in_tree(s,*t)
         t.collect { |x|
             if x.is_a? Array
@@ -187,6 +165,104 @@ class A_replacement < A_container
                 x.gsub(/(\G|[^\\])[\\$](\d)/) { "#{$1}#{s[$2.to_i-1+@hidden_patterns]}" }
             end
         }
+    end
+    def parse(*cs)
+        #result = begin ($parser ||= RubyParser.new).process cs.flatten.join; rescue Object; nil; end
+        result = begin RubyParser.new.process cs.flatten.join; rescue Object; nil; end
+        print "#{cs}  -->  #{result}\n" if $echo
+        result
+    end  
+    def concat_code(*cs)
+        #$echo = cs.join.include? '>'
+        pcs = {} 
+        cs = cs.collect { |c| (c.is_a? Array) ? concat_code(*c) : c }
+        cs.each { |c| pcs[c] = parse c }
+        safe_cs = cs.collect { |c| (c =~ /^ *[a-z_0-9]+ *$/) ? c : (pcs[c] && pcs[c] == parse("(#{c})")) ? "(#{c})" : c }
+        target = parse safe_cs
+        all_cs = 0...cs.length
+        all_cs.each { |i|
+            # if its a parsable entity and we get a different result omiting the parins, keep them 
+            if pcs[cs[i]] and parse(all_cs.collect { |j| (j<=i)? cs[j] : safe_cs[j] } ) != target
+                cs[i] = safe_cs[i]
+            end  
+        }    
+        STDIN.readline if $echo
+        cs.join
+    end  
+    def top_op(pt)
+        pt and (pt[0] == :call) ? pt[2] : pt[0]
+    end
+    def set_top_op(pt,op)
+        fail unless pt
+        if pt[0] == :call
+            if op
+                pt[2] = op
+            else
+                fail #can't nil a call
+            end
+        else
+            if op
+                pt[0] = op
+            else
+                pt.shift # removing a not
+            end
+        end
+    end
+    def args(pt)
+        pt and (pt[0] == :call) ? [pt[1]]+pt[3..-1] : pt[1..-1]
+    end
+    Converse = {
+        :'=='  => :'!=',
+        :'=~'  => :'!~',
+        :'>'   => :'<=',
+        :'<'   => :'>=',
+        :not   => nil,
+        :'!'   => nil,
+        :true  => :false
+    }
+    Converse.update(Converse.invert)
+    Bool_op = Converse.keys.compact
+    def bool?(t)
+        Bool_op.include?(top_op(t)) or (([:and,:or].include?(top_op(t)) and bool?(t[1]) and bool?(t[2])))
+    end
+    def bool(*cs)
+        bool?(parse(cs)) ? cs : ['!!',cs]
+    end
+    def swap_top(cs,t,old_top,new_top)
+        goal = t.dup
+        set_top_op(goal,new_top)
+        s = concat_code(cs)
+        cs_flat = s.split(/(#{old_top})/)
+        (0...cs_flat.length).each { |i|
+            if cs_flat[i] == old_top.to_s
+                guess = [(cs_flat[0,i]||[]),new_top.to_s,(cs_flat[(i+1)..-1]||[])]
+                return guess if parse(concat_code(guess)) == goal
+            end
+        }
+        nil
+    end
+    def converse(*cs)
+        t = parse concat_code(cs)
+        top = top_op(t)
+        if !bool?(t)
+            ['!',cs]
+        elsif [:not,:"!"].include?(top) 
+            case cs.first
+            when Array       then [converse(*cs.first)] + cs[1..-1]
+            when /!(.*)/     then $1
+            when /not *(.*)/ then $1
+            else fail
+            end
+        elsif ct = Converse[top]
+            swap_top(cs,t,top,ct) || ['!',cs]
+        elsif [:and,:or].include? top
+            x = swap_top(cs,t,top,([:and,:or]-[top]).first)
+            if x and x.length == 3
+                [converse(x.first),x[1],converse(x.last)]
+            else
+                ['!',cs]
+            end
+        end
     end
     def with(*args,&block)
         #p args
@@ -437,6 +513,7 @@ class A_commit
     def files
         fail unless excluded_files.all? { |f| Git.tracked_files.include? f }
         (Git.tracked_files - excluded_files).grep(/\.rb$/)
+        #['lib/puppet/network/format.rb']
     end
     def to_s
         if refactors.length == 1
@@ -660,8 +737,10 @@ end
 
 commit "Use string interpolation" do
     replace_terms {
-        like '(.*)" *[+] ([$@]?[\w_0-9.:]+?)(.to_s\b)?(?! *[*(%\w_0-9.:{\[])'
+        #skip_files_where { |fn,text| @fn = fn; nil }
+        like '(.*)" *[+] *([$@]?[\w_0-9.:]+?)(.to_s\b)?(?! *[*(%\w_0-9.:{\[])'
         with '\1#{\2}"'
+        #provided { |prefix,suffix| $nnn ||= 0; $nnn += 1; p [@fn,prefix,suffix] if [1,2].include?($nnn); (prefix+'"').balanced_quotes? && [1,2].include?($nnn)}
         provided { |prefix,suffix| (prefix+'"').balanced_quotes? }
     }
     replace_terms {
@@ -688,19 +767,20 @@ commit "Use string interpolation" do
         with ' {\1}'
     }
     replace_terms {
+        #like '"([^"\n]*%s[^"\n]*)" *% *([^\]].*?|\[.+\])(?=$| *\#| *\b(do|if|while|until|unless|end|\}|:|,)\b)'
         like '"([^"\n]*%s[^"\n]*)" *% *(.+?)(?=$| *\b(do|if|while|until|unless|#)\b)'
         with { |format,args| '"'+@parsed_format.zip(@parsed_args.collect {|a| '#{'+a.strip.sub(/\.to_s$/,'')+'}'}+[nil]).flatten.compact.join+'"'+@post }
+        #provided { |format,args| parse('"'+format+'"') and parse(args) }
         provided { |format,args|
-            #p [format,args]
             @parsed_format = format.split('%s',-1)
             log = []
             if args =~ /^\[./
                 args,@post = args[0,1],args[1..-1]
-                args,@post = args+@post[0,1],@post[1..-1] until @post.empty? or args.balanced?("[]")
+                args,@post = args+@post[0,1],@post[1..-1] until @post.empty? or (args.balanced?("[]") and parse(args))
                 args = $1 if args =~ /^\[(.+)\]$/
             else
                 args,@post = args[0,1],args[1..-1]
-                (log << [args,@post,args.nesting_depth]; args,@post = args+@post[0,1],@post[1..-1]) until @post.empty? || (args+@post[0,1]).nesting_depth < 0 || (args.nesting_depth == 0 && @post=~ /^(,|;|=>)/)
+                (log << [args,@post,args.nesting_depth]; args,@post = args+@post[0,1],@post[1..-1]) until @post.empty? || (args+@post[0,1]).nesting_depth < 0 || (args.nesting_depth == 0 && parse("(#{args})") && @post=~ /^(,|;|=>| *\#)/)
                 #@post = ''
                 #args,@post = args[0..-2],args[-1,1]+@post until args.balanced_quotes? and args.balanced?('[](){}')
             end
@@ -733,9 +813,20 @@ commit "Use string interpolation" do
             'foo "stuff % bar" % list.collect { |x|'                    => :unchanged,
             '"Could not find %s for overriding" % list.collect { |o|'   => :unchanged,
             'info "facts %s" % [::File.basename(file.sub(".rb",""))]'   => 'info "facts #{::File.basename(file.sub(".rb",""))}"',
-            '"Foo %s" % name # use Foo a la #375'                       => '"Foo #{name}" # use Foo a la #375'
-
-       )
+            '"Foo %s" % name # use Foo a la #375'                       => '"Foo #{name}" # use Foo a la #375',
+            %q{method_list = {
+                    :intern_method => "from_%s" % name,
+                    :intern_multiple_method => "from_multiple_%s" % name,
+                    :render_multiple_method => "to_multiple_%s" % name,
+                    :render_method => "to_%s" % name
+            }} =>
+            %q{method_list = {
+                    :intern_method => "from_#{name}",
+                    :intern_multiple_method => "from_multiple_#{name}",
+                    :render_multiple_method => "to_multiple_#{name}",
+                    :render_method => "to_#{name}"
+            }}
+        )
         # For why we use % interpolation, see:
         #    commit 13069eca1a3e2b08f5201462021d83e2e0a81018
         #    Author: Daniel Pittman <daniel@rimspace.net>
@@ -1067,14 +1158,14 @@ end
 commit "Use ||= for conditional initialization" do
     replace_lines {
         like "(@?\w+) += +(.*) unless \1"
-        with '\1 ||= \2'
+        with ['\1',' ||= ','\2']
     }
 end
 
 commit "Use &&= for dependent initialization" do
     replace_lines {
         like "(@?\w+) += +(.*) if \1"
-        with '\1 &&= \2'
+        with ['\1',' &&= ','\2']
     }
 end
 

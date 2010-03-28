@@ -24,7 +24,7 @@ module Git
             #puts `git log | head -n 5`
             if $flag['debug']
                 puts "'#{@command}' failed!" unless successful?
-                puts @result
+                puts @result unless @command =~ /git show/
                 File.open(Git_log,'a') { |f| f.puts @command } if successful?
             end
         end
@@ -108,7 +108,7 @@ module Git
             case @result
             when /^fatal: (.*)$/; "#{@command} --> #{$1}"
             when /^error: (.*)$/; "#{@command} --> #{$1}"
-            when /^(.*failed.*)/; "#{@command} --> #{$1}"
+            #when /^(.*failed.*)/; p $1; "#{@command} --> #{$1}"
             when /(Merge conflict in.*)/; "#{@command} -- #{$1}"
             when /(CONFLICT.*: .*)/; "#{@command} -- #{$1}"
             when /It seems that I cannot create a rebase-apply directory/; @result
@@ -306,8 +306,27 @@ module Unit_test
     require 'yaml'
     Result_cache = '../refactor/unit_test_results'
     Results = Hash.new { |h,commit| 
-        h[commit] = `sudo rake unit 2>&1`.split("\n").grep(/\d+ tests, \d+ assertions/)
+        x = `sudo rake unit 2>&1`
+        te = Hash.new(0)
+        te[:total] = x.split("\n").grep(/\d+ tests, \d+ assertions/)
+        x.scan(/^ *\d+\).*?^ +\[?\.([a-z_\/.]+)/m).flatten.each { |f| te[f] += 1 }
+        h[commit] = te
     }
+    Prior = Hash.new(0)
+    def self.changes_in(commit)
+        delta = []
+        latest = Results[commit]
+        (Prior.keys + latest.keys - [:total]).sort.uniq.each { |f|
+            c1,c2 = Prior[f],(latest[f] || 0)
+            if c2 > c1
+                delta << "#{c2-c1} more in #{f} (#{c2} total)"
+            elsif c2 < c1
+                delta << "#{c1-c2} fewer in #{f} (#{c2} total)"
+            end
+        }
+        Prior.clear.update(latest)
+        delta.reject { |l| l =~ /^1 (more|fewer) in unit\/status.rb \([01] total\)/ }
+    end
     Results.update(YAML.load_file(Result_cache)) rescue nil
     at_exit { File.open(Result_cache,'w') { |f| YAML.dump(Results,f)} }
 end
@@ -390,8 +409,8 @@ end
                 results << "ran #{$1}" + 
                     (new_commits.empty? ? '' : (
                     ":\n    * "+new_commits.reverse.join("\n    * ")+
-                    ($flag['specs'] ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')+
-                    ($flag['unit-tests'] ? "\n    #{Unit_test::Results[Git.current_commit]}" : '')
+                    ($flag['specs']      ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')+
+                    ($flag['unit-tests'] ? "\n    #{Unit_test::Results[Git.current_commit][:total]}"+Unit_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
                     ))
             end
         when /(\w+)\s*=\s*(.+)/
@@ -464,8 +483,8 @@ end
                     Git.delete_branch('testing') and Git.rename_branch('testing-temp','testing') or fail Git.error_message
                     result += ":\n    * "+Git.commits_since(head_at_start).reverse.collect {|x| x[0,75] + ((x.length>75)? '...':'') }.join("\n    * ")+
                         (skipped_commits.empty? ? '' : ["\n  ..skipped",skipped_commits].flatten.join("\n    "))+
-                        ($flag['specs'] ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')+
-                        ($flag['unit-tests'] ? "\n    #{Unit_test::Results[Git.current_commit]}" : '')
+                        ($flag['specs']      ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')+
+                        ($flag['unit-tests'] ? "\n    #{Unit_test::Results[Git.current_commit][:total]}"+Unit_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
                 rescue => e
                     how_far_we_got = "\n    x "+Git.commits_since(head_at_start).reverse.join("\n    x ")
                     Git.abort_rebase_to('testing')
