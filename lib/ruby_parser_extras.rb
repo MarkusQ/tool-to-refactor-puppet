@@ -458,7 +458,7 @@ class RubyParser < Racc::Parser
 
   def new_call recv, meth, args = nil
     #result = s(:call, recv, meth)
-    result = s(meth, recv, meth)
+    result = s(meth, recv)
     result.line = recv.line if recv
 
     args ||= s(:arglist)

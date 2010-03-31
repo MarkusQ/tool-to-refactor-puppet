@@ -13,11 +13,15 @@ martin=git://github.com/pmenglund/puppet.git
 #
 specs on
 unit-tests on
+
+#start skipping
+
 testing #= Branching off master
 
 jesse:ticket/0.25.x/3423 from fe19524a01c152f4b8b57cd43787319ba12041df    #= Unit test fixes
 jesse:repairs/master/test-unit-tests                                      #= More unit test fixes
 
+reinh:feature/master/single_executable
 bkearney:ticket/0.25.x/3387                                               #= Backslashes in augeas
 luke:tickets/master/2759                                                  #= Events
 ethanrowe:tickets/master/2239                                             #= TERM signal
@@ -42,10 +46,13 @@ markus:refactor/master/3216                                               #= Str
 luke:tickets/master/3096    from b92f3175a885bda49b86aed1d32b9d6466360bcf #= internal DSL
 luke:tickets/master/3398                                                  #= Checksum parameter
 
-#skip rest
-#!ruby ../refactor/refactor.rb
+#start skipping
+!ruby ../refactor/refactor.rb
 
-#skip rest
+#stop skipping
+start skipping
+#start at 475688d
+
 !ruby ../refactor/refactor.rb 'Miscellaneous oddity removal'
 !ruby ../refactor/refactor.rb 'Inconsistent indentation and related formatting issues'
 !ruby ../refactor/refactor.rb 'Use {} for % notation delimiters wherever practical'

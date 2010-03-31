@@ -335,6 +335,9 @@ def go_to_testing
     unless $root_of_testing
         Git.checkout('testing',$start_at || 'master')
         $root_of_testing = Git.current_commit
+        puts "Starting at #{$root_of_testing}"
+        Unit_test.changes_in($root_of_testing)
+        Spec_test.changes_in($root_of_testing)
     end
     Git.checkout('testing')
 end
@@ -428,13 +431,13 @@ end
             fail "You can only specify one place to start." if $start_at
             $start_at = $1
         else
-            go_to_testing
             branch_to_merge,first_commit = (line =~ /(.*) *from *([0-9a-f]+)/) ? [$1,$2] : [line,nil]
             try_to_recover = branch_to_merge.gsub!(/^~/,'')
             result = ''
             if $flag['skipping']
                 result = 'skipped'
             else
+                go_to_testing
                 begin
                     result = 'succeeded'
                     head_at_start = Git.current_commit
