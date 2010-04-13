@@ -219,7 +219,7 @@ module Resolutions
                 File.open(patch_name(file,n),'w') {|f| f.print resolution }
             }
             # But we don't add and commit them because that way lies maddness.
-            @@branches_seen = ['???']
+            @@branches_seen = ['???','master']
             @@fixups = Hash[*File.read('merge-conflict/fixups').split(/^Resolving *conflicts *between *(.* and .*) *$/,-1)[1..-1]]
         end
         def apply_fixups_for(branch)
@@ -227,7 +227,7 @@ module Resolutions
                 patches = [@@fixups["#{branch} and #{other_branch}"],@@fixups["#{other_branch} and #{branch}"]].compact.join("\n")
                 unless patches.empty?
                     patches.scan(/^(diff.*?)^end-diff *$/m).flatten.each { |patch|
-                        file = patch[/ a\/(.*r[ab]) /,1]
+                        file = patch[/ a\/(.*) /,1]
                         if file
                             delete_patch_temp_files(file)
                             File.open('temp-fixup.patch','w') { |f| f.print patch }
@@ -261,9 +261,10 @@ module Spec_test
     #
     require 'yaml'
     Result_cache = '../refactor/spec_results'
-    #Spec_test_results = Hash.new { |h,commit| h[commit] = `sudo ruby quietly_install.rb 2> /dev/null > /dev/null; rake spec 2>&1 | tail -n 1`}
+    #Spec_test_results = Hash.new { |h,commit| h[commit] = `sudo rm -rf /Library/Ruby/Site/1.8/puppet/; sudo ruby quietly_install.rb 2> /dev/null > /dev/null; rake spec 2>&1 | tail -n 1`}
     Results = Hash.new { |h,commit| 
-        x = `sudo ruby install.rb &> /dev/null; rake spec 2>&1`.split("\n") 
+        #x = `sudo rm -rf /Library/Ruby/Site/1.8/puppet/; sudo ruby install.rb &> /dev/null; rake spec 2>&1`.split("\n") 
+        x = `sudo rm -rf /Library/Ruby/Site/1.8/puppet*; rake spec 2>&1`.split("\n") 
         te = Hash.new(0)
         te[:total] = x.last
         re = /^\.\/spec\/((unit|integration).*):\d+:$/
@@ -316,6 +317,7 @@ module Unit_test
     def self.changes_in(commit)
         delta = []
         latest = Results[commit]
+        return ['(stats unavailable)'] if "#{latest[:total]}".strip.empty?
         (Prior.keys + latest.keys - [:total]).sort.uniq.each { |f|
             c1,c2 = Prior[f],(latest[f] || 0)
             if c2 > c1
@@ -336,8 +338,8 @@ def go_to_testing
         Git.checkout('testing',$start_at || 'master')
         $root_of_testing = Git.current_commit
         puts "Starting at #{$root_of_testing}"
-        Unit_test.changes_in($root_of_testing)
         Spec_test.changes_in($root_of_testing)
+        Unit_test.changes_in($root_of_testing)
     end
     Git.checkout('testing')
 end
@@ -415,7 +417,7 @@ end
                 Git.run $1
                 new_commits = Git.commits_since(head_at_start)
                 results << "ran #{$1}" + 
-                    (new_commits.empty? ? '' : (
+                    ((Git.current_commit == head_at_start) ? '' : (
                     ":\n    * "+new_commits.reverse.join("\n    * ")+
                     ($flag['specs']      ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')+
                     ($flag['unit-tests'] ? "\n    #{Unit_test::Results[Git.current_commit][:total]}"+Unit_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
@@ -505,6 +507,7 @@ end
                     result = "failed: #{e}" + #"\n#{[e.backtrace].flatten.join("\n")}\n"+
                         how_far_we_got+
                         conflicts.collect { |file,contents,merge_branch| "\n    "+Resolutions.needed_for(file,contents,merge_branch) }.join
+                    #raise unless $flag['continue-on-error']
                 ensure
                     Git.config('--unset','merge.conflictstyle')
                 end

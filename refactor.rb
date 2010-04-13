@@ -1,7 +1,5 @@
 require File.dirname(__FILE__)+'/refactoring_tools'
 
-puts "Ok"
-abort
 #-------------------------------------------------------------------------------------------------------------------------------------
 Line_length_limit = 160
 commit "Miscellaneous oddity removal" do
@@ -537,10 +535,11 @@ commit "Avoid explicit returns" do
         }
         with %q{
             \1
-                \2
+                LINES:\2
                 \3
             end
         }
+        provided { |indent,header,body,result| parse(result) } # can't elide "return a,b" to "a,b" 'cause it won't parse
     }
 end
 
@@ -557,9 +556,9 @@ commit "Avoid unneeded blocks" do
         }
         with %q{
             \1
-                \2
+                LINES:\2
             rescue\3
-                \4
+                LINES:\4
             end
         }
     }

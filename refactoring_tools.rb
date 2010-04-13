@@ -84,7 +84,7 @@ end
 
 module Git
     def self.tracked_files 
-        @tracked_files ||= `git ls-files`.
+        `git ls-files`.
           split("\n").
           collect { |l| l.chomp}
     end
@@ -129,10 +129,17 @@ class A_replacement < A_container
     def skip?
         @skip
     end
+    def trace!
+        @trace = true
+    end
+    def trace?
+        @trace
+    end
     def like(s,desc=nil)
         fail "Can't have more than one pattern" if @pat
         s = /#{s.remove_leading_and_trailing_blank_lines.deindented}/ unless s.is_a? Regexp
         @pat = s
+        puts "Looking for #{s.source}" if trace?
         @pattern_description ||= desc || s.source
     end
     def determ(s)
@@ -274,6 +281,7 @@ class A_replacement < A_container
         @_replacement = args.first
         @_replacement = @_replacement.split(/(\^\d+)/).collect { |s| s.sub(/\^(\d+)/,"\\"+'\1') } if @_replacement =~ /\^\d/
         #@replacement = block || lambda { |*s| @_replacement.gsub(/(\G|[^\\])[\\$](\d)/) { "#{$1}#{s[$2.to_i-1]}" } }
+        puts "With #{@_replacement}" if trace?
         @replacement = block || lambda { |*s| concat_code(replace_in_tree(s,@_replacement)) }
     end
     def provided(&block)
@@ -301,6 +309,7 @@ class A_replacement < A_container
         new_version
     end
     def note_possible_example(*data)
+        puts format_example(stash_example(*data)) if trace?
         examples_wanted = examples_to_show || 3
         @examples << stash_example(*data) if @examples.length < examples_wanted or rand(100) == 0
         @examples.delete_at(rand(@examples.length)) if @examples.length > examples_wanted
@@ -327,6 +336,8 @@ class A_replacement < A_container
         end
         text
     end
+    def do_setup
+    end
     def apply_to(file_name,text)
         if (reasons = @reasons_to_skip.collect { |pc| pc.call(file_name,text) }.compact).empty?
             replace_in(text)
@@ -335,6 +346,8 @@ class A_replacement < A_container
             @skipped_files << "#{file_name} because #{reasons.join(',')}" unless reasons.join.empty?
             text
         end
+    end
+    def do_cleanup
     end
     def passes_tests?
         result = (tests || {}).all? { |a,b|
@@ -406,13 +419,17 @@ class A_consecutive_line_replacement < A_replacement
         @hidden_patterns += 1
     end
     def like(s,desc=nil)
-        s = s.remove_leading_and_trailing_blank_lines.deindented
-        desc ||= s
-        s = s.
-            gsub(/\\(\d+)/) { |x| "\\#{$1.succ}"}.
-            as_lines.
-            join('\n\1')
-        super /^( *)#{s}/,desc
+        if s.is_a? String
+            s = s.remove_leading_and_trailing_blank_lines.deindented
+            desc ||= s
+            s = s.
+                gsub(/\\(\d+)/) { |x| "\\#{$1.succ}"}.
+                as_lines.
+                join('\n\1')
+            super /^( *)#{s}/,desc
+        else
+            super s,desc
+        end
     end
     def mungle(rep,*prefix)
         case rep
@@ -454,11 +471,20 @@ class A_term_replacement < A_replacement
 end
 
 class A_method_replacement < A_consecutive_line_replacement
+    def mungle(replacement,*prefix)
+        # find all \x in replacements that match "(LINES)" and remove the preceeding /\n */
+        replacement = replacement.gsub(/\n *LINES:/,'') if replacement.is_a? String
+        super replacement,*prefix
+    end
     def like(s,desc=nil)
-        s = s.
-            gsub(/^( *)\(LINES\)/) { |x| "((?:#{$1}\\0.*\n| *\n)*)" }.
+        desc ||= s
+        s = s.remove_leading_and_trailing_blank_lines.deindented.
+            gsub(/\\(\d+)/) { |x| "\\#{$1.succ}"}.
+            as_lines.
+            join('\n\1').
+            gsub(/\\n\\1( *)\(LINES\)/) { |x| "((?:\\n\\1#{$1}.*|\\n *)*)" }.
             gsub(/\(DEF\)/,'(def .*)')
-        super s,desc
+        super /^( *)#{s}/,desc
     end
     # fills in patterns for (METHOD_HEADER), (LINES), etc.
 end
@@ -468,6 +494,7 @@ class A_targeted_replacement
         @changes = args.pop
         @files = args
         @desc = Hash.new(0)
+        @expected = args.dup
     end
     def skip!(*args)
         @skip = args
@@ -478,15 +505,43 @@ class A_targeted_replacement
     def passes_tests?
         true
     end
+    def do_setup
+        #puts "Looking for #{@files.join(', ')}","To replace",@changes.inspect
+    end
     def apply_to(file_name,text)
+        @expected -= [file_name]
         @changes.each { |old,new| text.gsub!(old) { @desc[[file_name,old,new]] += 1;new}} if @files.include? file_name
         text
+    end
+    def do_cleanup
+        puts "Expected but did not see #{@expected.join(', ')}." unless @expected.empty?
+        #puts @desc.to_yaml
     end
     def to_s
         @desc.collect { |x| 
             file,old,new,n = *x.flatten
             "Changed #{old.inspect} to #{new.inspect} in #{file}#{" #{n} times." if n > 1}"
         }.join("\n* ")
+    end
+end
+
+class A_scripted_refactor
+    def initialize(*commands)
+        @commands = commands
+    end
+    def skip?
+        false
+    end
+    def passes_tests?
+        true
+    end
+    def do_setup
+    end
+    def apply_to(file_name,text)
+        text
+    end
+    def do_cleanup
+        @commands.each { |command| `#{command}` }
     end
 end
 
@@ -516,6 +571,9 @@ class A_commit
     def replace_in(*args)
         @refactors << A_targeted_replacement.new(*args)
     end
+    def run(*commands)
+        @refactors << A_scripted_refactor.new(*commands)
+    end
     def excluded_files
         [
             "lib/puppet/parser/parser.rb",                                 # Generated code
@@ -524,11 +582,16 @@ class A_commit
     end
     def files
         fail unless excluded_files.all? { |f| Git.tracked_files.include? f }
-        (Git.tracked_files - excluded_files).grep(/\.rb$/)
+        (Git.tracked_files - excluded_files).grep(/\.r[ab]$/)
         #['lib/puppet/network/format.rb']
     end
+    def commit_message(text)
+        @commit_message = text.remove_leading_and_trailing_blank_lines.deindented
+    end
     def to_s
-        if refactors.length == 1
+        if @commit_message
+            "#{msg.strip}\n\n#{@commit_message}\n"
+        elsif refactors.length == 1
             "Code smell: #{msg.strip}\n\n#{refactors}\n"
         else
             "Code smell: #{msg.strip}\n\n#{refactors.collect { |r| "* "+r.to_s.indented(2)}.join("\n\n")}\n"
@@ -547,6 +610,7 @@ class A_commit
         end
         # object if there are uncommitted changes
         Git.commit(self) {
+            refactors.each { |refactor| refactor.do_setup }
             files.each { |file|
                 text = refactors.inject(File.read(file)) { |text,refactor| 
                     # puts "#{file} #{refactor.title || refactor.pattern_description}"; 
@@ -558,10 +622,7 @@ class A_commit
                     abort
                 end
             }
-        if false
-            `rake spec &> rfrs.out`
-            puts File.readlines('rfrs.out').last
-        end
+            refactors.each { |refactor| refactor.do_cleanup }
         }
     end
     def skip!(*args)
