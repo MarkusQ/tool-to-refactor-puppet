@@ -12,54 +12,41 @@ paul=git://github.com/plathrop/puppet.git
 #
 # Branches to merge into master to produce testing branch
 #
-specs on
-unit-tests on
 
 testing #= Branching off master
 
-jesse:ticket/0.25.x/3423 from fe19524a01c152f4b8b57cd43787319ba12041df    #= Unit test fixes
-jesse:repairs/master/test-unit-tests                                      #= More unit test fixes
-reinh:feature/master/single_executable
-bkearney:ticket/0.25.x/3387                                               #= Backslashes in augeas
-luke:tickets/master/2759                                                  #= Events
-jesse:bugs/testing/events from ea2eea9c9272d86ab1a4d9adaa46235255e4c2a9   #- fixes to events
-ethanrowe:tickets/master/2239                                             #= TERM signal
-martin:tickets/0.25.x/3412                                                #= . is not a tempdir
-markus:ticket/master/3113                                                 #= Wait for smf status change
-markus:ticket/master/2604                                                 #= ZAML
-markus:ticket/0.25.x/3424 from 2defc009f0403953a8ebcdb5f34b459921428eb2   #= ZAML patch
-markus:ticket/0.25.x/3366                                                 #= bool settings fix
-
-#markus:ticket/master/3225 from 221c5cecbc3ebf1e279f1d907993e9350c66dfe0   #= Fix for minor bug in luke:tickets/master/2759
-#brice:tickets/0.25.x/3396                                                 #= Faster event propagation
-luke:tickets/master/3015                                                  #= Per Environment known resource types
-luke:tickets/master/1943                                                  #= Combine yaml & file termini
-brice:tickets/0.25.x/3229                                                 #= regex case sensitivity
-jesse:feature/master/3394                                                 #= REST (3115,3347,3383,3394)
-luke:tickets/testing/2954   from 9b15984c199c81ffb2aac8a1aae4996a2cbde315 #= Class parameters; depends on 3015
-markus:refactor/master/3216                                               #= String interpolation
-luke:tickets/master/3096    from b92f3175a885bda49b86aed1d32b9d6466360bcf #= internal DSL
-luke:tickets/master/3398                                                  #= Checksum parameter
+specs on
+unit-tests on
 
 
-luke:feature/master/3518-dot_format                                       #= 'dot' formats
-martin:tickets/0.25.x/3399                                                #= zone type should handle exclusive IP stacks
-andrew:feature/0.25.x/zypper                                              #= zypper for OpenSuSE
+#Code Insufficient: jesse:ticket/master/3554                                                   #= test problem
+
+
 # brice:tickets/master/3373   from 1ce553348156d626101d92fd3db14873537bc7e9 #= File streaming
 #* #3155; Brice, Overwriting ephemeral values [absent from testing/master]
-#hoanga:0.25.x_1.9.1                                                       #= Ruby 1.9.x const_set/const_get
+
+
+#2927
+
+# stat(false) is not even valid in 1.8
+# hoanga:0.25.x_1.9.1                                                       #= Ruby 1.9.x const_set/const_get
 #jesse:ticket/0.25.x/3451                                                  #= Sporadic catalog filtering errors
 #martin:tickets/0.25.x/3449                                                #= exec type project on Solaris
 #paul:ticket/0.25.x/3295                                                   #= exec in directory of script
 #paul:ticket/0.25.x/1999                                                   #= force-yes for downgrade in apt
+# Seems to conflict with reinh:tickets/master/3399
+# pmenglund:tickets/0.25.x/3449                                               #= exec projects on Solaris
 
+luke:features/master/2658-run_stages                                        #= Add puppet "run stages
 
+start test-each-commit
+DavidS:feature/master/windows
+stop test-each-commit
 
-#start skipping
+start skipping
 !ruby ../refactor/refactor.rb
 !ruby ../refactor/futures_setup.rb 
 start skipping
-#start at 475688d
 
 !ruby ../refactor/refactor.rb 'Miscellaneous oddity removal'
 !ruby ../refactor/refactor.rb 'Inconsistent indentation and related formatting issues'

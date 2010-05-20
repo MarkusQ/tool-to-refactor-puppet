@@ -57,8 +57,9 @@ commit "Rename AST nodes as Expression nodes" do
     replace_lines { like '(require.*/ast)/asthash(.*)';  with '\1/hash\2'           }
     replace_lines { like '(require.*/ast)/astarray(.*)'; with '\1/array\2'          }
     replace_lines { like '(require.*/parser)/ast(.*)';  with '\1/expression\2'      }
-    run(  
+    run(
         "git mv test/language/ast.rb              test/language/expression.rb",
+        "rm -r lib/puppet/parser/expression",
         "git mv test/language/ast                 test/language/expression",
         "git mv spec/unit/parser/ast/asthash.rb   spec/unit/parser/ast/hash.rb",
         "git mv spec/unit/parser/ast/astarray.rb  spec/unit/parser/ast/array.rb",
@@ -131,7 +132,7 @@ commit "Expression denotations should be cachable" do
         should be possible to compute the result once and cache (memoize) it.
 
         Just making the change causes a few test failures, because the tests were
-        explicitly depending on the erroneous behaviour, so those most of tests 
+        explicitly depending on the erroneous behaviour; most of tests broken tests
         were fixed.  In general the problem was that the older unit tests were 
         constructing an Expression and then repeatedly evaluating it under changing
         conditions, expecting the results to change.

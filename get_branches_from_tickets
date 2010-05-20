@@ -11,9 +11,9 @@ CSV.parse(`curl http://projects.reductivelabs.com/projects/puppet/issues.csv`).e
 p names
 data.
   sort_by { |r| r['#'] }.
-  select  { |r| r['Status'] == 'Ready for Testing' and r['Project'] == 'Puppet' }.
+  select  { |r| (r['Status'] == 'Ready for Testing' and r['Project'] == 'Puppet') }.
   collect { |r| [
-    r['Branch'].sub(%r{(?:http://|git@)github.com[/:](.+)/puppet(/tree|.git)/? *},'\1:').sub(/^(\w+)\//,'\1:'),
+    r['Branch'].sub(%r{(?:http|git)[:/@]+github.com[/:](.+)/puppet(/tree|.git)/? *},'\1:').sub(/^(\w+)\//,'\1:'),
     r['Subject']
   ] }.
   each { |r| puts "%-75s #= %s" % r }

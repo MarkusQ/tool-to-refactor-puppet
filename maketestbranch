@@ -220,7 +220,7 @@ module Resolutions
             }
             # But we don't add and commit them because that way lies maddness.
             @@branches_seen = ['???','master']
-            @@fixups = Hash[*File.read('merge-conflict/fixups').split(/^Resolving *conflicts *between *(.* and .*) *$/,-1)[1..-1]]
+            @@fixups = Hash[*(File.read('merge-conflict/fixups').split(/^Resolving *conflicts *between *(.* and .*) *$/,-1)[1..-1]||[])]
         end
         def apply_fixups_for(branch)
             @@branches_seen.each { |other_branch|
@@ -264,7 +264,8 @@ module Spec_test
     #Spec_test_results = Hash.new { |h,commit| h[commit] = `sudo rm -rf /Library/Ruby/Site/1.8/puppet/; sudo ruby quietly_install.rb 2> /dev/null > /dev/null; rake spec 2>&1 | tail -n 1`}
     Results = Hash.new { |h,commit| 
         #x = `sudo rm -rf /Library/Ruby/Site/1.8/puppet/; sudo ruby install.rb &> /dev/null; rake spec 2>&1`.split("\n") 
-        x = `sudo rm -rf /Library/Ruby/Site/1.8/puppet*; rake spec 2>&1`.split("\n") 
+        x = `sudo rm -rf /Library/Ruby/Site/1.8/puppet*; rake spec 2>&1`.split("\n")
+        Git.checkout(commit)
         te = Hash.new(0)
         te[:total] = x.last
         re = /^\.\/spec\/((unit|integration).*):\d+:$/
@@ -300,14 +301,22 @@ module Spec_test
     }
     Results.update(YAML.load_file(Result_cache)) rescue nil
     at_exit { File.open(Result_cache,'w') { |f| YAML.dump(Results,f)} }
+    def self.report_on(commit)
+        if $flag['specs']
+            "\n    #{Results[commit][:total]}"+changes_in(commit).collect { |d| "\n        #{d}"}.join  
+        else
+            ''
+        end
+    end
 end
-
 
 module Unit_test
     require 'yaml'
     Result_cache = '../refactor/unit_test_results'
-    Results = Hash.new { |h,commit| 
+    Results = Hash.new { |h,commit|
+        Git.checkout(commit)
         x = `sudo rake unit 2>&1`
+        File.open("unit_test_results_for_#{commit}","w") { |f| f.print x }
         te = Hash.new(0)
         te[:total] = x.split("\n").grep(/\d+ tests, \d+ assertions/)
         x.scan(/^ *\d+\).*?^ +\[?\.([a-z_\/.]+)/m).flatten.each { |f| te[f] += 1 }
@@ -331,6 +340,13 @@ module Unit_test
     end
     Results.update(YAML.load_file(Result_cache)) rescue nil
     at_exit { File.open(Result_cache,'w') { |f| YAML.dump(Results,f)} }
+    def self.report_on(commit)
+        if $flag['unit-tests']
+            "\n    #{Results[commit][:total]}"+changes_in(commit).collect { |d| "\n        #{d}"}.join  
+        else
+            ''
+        end
+    end
 end
 
 def go_to_testing
@@ -344,13 +360,16 @@ def go_to_testing
     Git.checkout('testing')
 end
 
-def try_to_rebase(sources,branch_to_merge,first_commit)
+def try_to_rebase(sources,branch_to_merge,first_commit,via_branch=nil)
     if branch_to_merge =~ /(\w+)\s*:\s*(\S+)/
         # It's a remote branch; fetch it as testing-temp
         Git.fetch(sources[$1],$2,'testing-temp') and Git.checkout('testing-temp') or fail(Git.error_message)
     else
         # It's local; start testing temp off of it
         Git.checkout('testing-temp',branch_to_merge)
+    end
+    if via_branch
+        Git.rebase(via_branch) or fail "Unable to rebase #{branch_to_merge} on #{via_branch}:#{Git.result}"
     end
     if first_commit
         fail "#{first_commit} not found" unless Git.show(first_commit)
@@ -412,15 +431,21 @@ end
             if $flag['skipping']
                 results << "skipped running #{$1}"
             else
+                command = $1
                 go_to_testing
                 head_at_start = Git.current_commit
-                Git.run $1
+                case Git.run "#{command} 2>&1"
+                when /Automatic cherry-pick failed/
+                  Git.reset('--hard')
+                  results << "Failed: #{line} (#{branch_desc})"
+                  next
+                end
                 new_commits = Git.commits_since(head_at_start)
-                results << "ran #{$1}" + 
+                results << "ran #{command}" + 
                     ((Git.current_commit == head_at_start) ? '' : (
                     ":\n    * "+new_commits.reverse.join("\n    * ")+
-                    ($flag['specs']      ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')+
-                    ($flag['unit-tests'] ? "\n    #{Unit_test::Results[Git.current_commit][:total]}"+Unit_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
+                    Spec_test.report_on(Git.current_commit)+
+                    Unit_test.report_on(Git.current_commit)
                     ))
             end
         when /(\w+)\s*=\s*(.+)/
@@ -433,7 +458,8 @@ end
             fail "You can only specify one place to start." if $start_at
             $start_at = $1
         else
-            branch_to_merge,first_commit = (line =~ /(.*) *from *([0-9a-f]+)/) ? [$1,$2] : [line,nil]
+            line,via_branch              = (line =~ /(.*) *via *(\w+)(.*)/) ? [$1+$3,$2] : [line,nil]
+            branch_to_merge,first_commit = (line =~ /(.*) *from *([0-9a-f]+|head)[\^]*/) ? [$1,$2] : [line,nil]
             try_to_recover = branch_to_merge.gsub!(/^~/,'')
             result = ''
             if $flag['skipping']
@@ -443,7 +469,7 @@ end
                 begin
                     result = 'succeeded'
                     head_at_start = Git.current_commit
-                    try_to_rebase(sources,branch_to_merge,first_commit)
+                    try_to_rebase(sources,branch_to_merge,first_commit,via_branch)
                     skipped_commits = []
                     conflicts = []
                     try_three_way = true
@@ -496,10 +522,20 @@ end
                     end
                     Resolutions.apply_fixups_for(branch_to_merge.gsub(/\s/,''))
                     Git.delete_branch('testing') and Git.rename_branch('testing-temp','testing') or fail Git.error_message
-                    result += ":\n    * "+Git.commits_since(head_at_start).reverse.collect {|x| x[0,75] + ((x.length>75)? '...':'') }.join("\n    * ")+
-                        (skipped_commits.empty? ? '' : ["\n  ..skipped",skipped_commits].flatten.join("\n    "))+
-                        ($flag['specs']      ? "\n    #{Spec_test::Results[Git.current_commit][:total]}"+Spec_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')+
-                        ($flag['unit-tests'] ? "\n    #{Unit_test::Results[Git.current_commit][:total]}"+Unit_test.changes_in(Git.current_commit).collect { |d| "\n        #{d}"}.join  : '')
+                    result += 
+                      ":\n    * "+
+                      Git.
+                        commits_since(head_at_start).
+                        reverse.
+                        collect {|x| 
+                            c = x[/[0-9a-f]+/]
+                            x[0,75]+
+                              ((x.length>75)? '...':'')+
+                              ($flag['test-each-commit'] ? (Spec_test.report_on(c)+Unit_test.report_on(c)) : '')
+                        }.
+                        join("\n    * ")+
+                      (skipped_commits.empty? ? '' : ["\n  ..skipped",skipped_commits].flatten.join("\n    "))+
+                      ($flag['test-each-commit'] ? '' : (Spec_test.report_on(Git.current_commit)+Unit_test.report_on(Git.current_commit)))
                 rescue => e
                     how_far_we_got = "\n    x "+Git.commits_since(head_at_start).reverse.join("\n    x ")
                     Git.abort_rebase_to('testing')

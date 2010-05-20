@@ -22,6 +22,7 @@ commit "Inconsistent indentation and related formatting issues" do
         like /^(.*?) +$/
         with '\1'
         title "Eliminate trailing spaces."
+        skip_files_where { |file_name,text| file_name =~ /test\/ral\/providers\/host\/parsed\.rb/ }
         examples_to_show 0
     }
     replace_lines {
@@ -287,6 +288,7 @@ commit "Line modifiers are preferred to one-line blocks." do
     replace_consecutive_lines {
         like '((if|unless) .*?) *then$'
         with '\1'
+        provided { |indent,cond_clause,keyword| cond_clause !~ /;$/ } # Don't mess with imbedded bash / puppet code
         examples_to_show 3
         rational "
             The then is unneeded in the block header form and causes problems
@@ -655,6 +657,7 @@ commit "Avoid needless decorations" do
         provided { |prefix,method| method != 'super'                  } # Because () means no arguments, and nothing means the same arguments we got
         provided { |prefix,method| prefix !~ /\b#{method} *[-+|&]*=/  } # beware things like 'foo = foo()'!
         provided { |prefix,method| prefix.balanced_quotes?            } # We don't want to change things like @parser.parse("tag()")
+        provided { |prefix,method| prefix !~ /parser\.parse/          } # Because sometimes we see things like "parser.parse %{tag()}".  *sigh*
         #proc() -> proc
     }
     replace_lines {
@@ -667,6 +670,7 @@ commit "Two space indentation" do
     replace_lines {
         like /^( +)(.*$)/
         with { |indent,content| ' '*(indent.length/2)+content }
+        provided { |indent,content| !content.empty? }
         context 3
         rational "
             The ruby community almost universally (i.e. everyone but Luke, Markus, and the other eleven people
