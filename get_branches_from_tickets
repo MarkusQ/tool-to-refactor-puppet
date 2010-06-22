@@ -14,7 +14,8 @@ data.
   select  { |r| (r['Status'] == 'Ready for Testing' and r['Project'] == 'Puppet') }.
   collect { |r| [
     r['Branch'].sub(%r{(?:http|git)[:/@]+github.com[/:](.+)/puppet(/tree|.git)/? *},'\1:').sub(/^(\w+)\//,'\1:'),
+    r['#'],
     r['Subject']
   ] }.
-  each { |r| puts "%-75s #= %s" % r }
+  each { |r| puts "%-75s #= %s: %s" % r }
 

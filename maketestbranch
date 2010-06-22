@@ -263,6 +263,7 @@ module Spec_test
     Result_cache = '../refactor/spec_results'
     #Spec_test_results = Hash.new { |h,commit| h[commit] = `sudo rm -rf /Library/Ruby/Site/1.8/puppet/; sudo ruby quietly_install.rb 2> /dev/null > /dev/null; rake spec 2>&1 | tail -n 1`}
     Results = Hash.new { |h,commit| 
+        `find spec -exec touch -r . {} \\;`
         #x = `sudo rm -rf /Library/Ruby/Site/1.8/puppet/; sudo ruby install.rb &> /dev/null; rake spec 2>&1`.split("\n") 
         x = `sudo rm -rf /Library/Ruby/Site/1.8/puppet*; rake spec 2>&1`.split("\n")
         Git.checkout(commit)

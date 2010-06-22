@@ -13,7 +13,7 @@ paul=git://github.com/plathrop/puppet.git
 # Branches to merge into master to produce testing branch
 #
 
-testing #= Branching off master
+#testing #= Branching off master
 
 specs on
 unit-tests on
@@ -37,13 +37,36 @@ unit-tests on
 # Seems to conflict with reinh:tickets/master/3399
 # pmenglund:tickets/0.25.x/3449                                               #= exec projects on Solaris
 
-luke:features/master/2658-run_stages                                        #= Add puppet "run stages
-
-start test-each-commit
-DavidS:feature/master/windows
-stop test-each-commit
-
 start skipping
+luke:tickets/master/2655-default_values_added_to_resources                  #= 2655: Deafult param values for defs
+luke:features/master/2658-run_stages                                        #= 2658: Add puppet "run stages
+
+jes5199:ticket/master/2935-settings-mode                                    #= 2935: 'agent' and 'server' settings
+MarkusQ:ticket/master/3664                                                  #= 3664: variable interpolation
+luke:tickets/master/2655-default_values_added_to_resources                  #= 3671: "--compile" output
+mmrobins:bug/0.25.x/3748-ldap_group_membership_comparison from 17bc2ec7b942425daac2 #= 3748: group membership problem
+luke:tickets/master/3791-actually_use_environment                           #= 3791: Default server environment
+westr:feature/master/portupgrade                                            #= 3793: Freebsd ports package redo
+luke:tickets/master/3822-content_from_filebucket                            #= 3822: Retrieve content by checksum
+                                                                            #= 3851: Must pass an array to execute()
+mmrobins:bug/0.25.x/3866-metaclass_deprecation from b1fc08e90cc0ba684003    #= 3866: metaclass is deprecated
+jamtur01:tickets/master/3912                                                #= 3912: Certificate name as fact
+#jamtur01:tickets/master/3021                                                #= 3021: Config vals as facts
+MarkusQ:ticket/0.25.x/3949 from baac12b2e74cfea                             #= 3949: Zaml loading unknown class
+reinh:feature/master/3921-facts_terminus-setting                            #= 3921: Facts terminus configurability
+luke:tickets/master/1175-functions_in_environments                          #= 1175: functions in environments
+
+stop skipping
+
+#start test-each-commit
+#DavidS:feature/master/windows
+jes5199:fixup/testing/win32-commits
+#stop test-each-commit
+
+
+#start at fbc6ca5
+!ruby ../refactor/use_feature_root.rb
+
 !ruby ../refactor/refactor.rb
 !ruby ../refactor/futures_setup.rb 
 start skipping

@@ -109,7 +109,7 @@ commit "Expressions denote values, computation is just a means to this end" do
     replace       { like ':safeevaluate( *=>)';                          with ':denotation\1'           }
     replace       { like ':safeevaluate(\)\.with\(@scope\))';            with ':denotation\1'           }
     replace_in "spec/unit/resource/type.rb", 
-                         "code.expects(:safeevaluate).with @type.subscope" => "code.expects(:denotation).with @type.subscope"
+          "code.expects(:safeevaluate).with @type.subscope" => "code.expects(:denotation).with @type.subscope"
     replace_terms { like ':safeevaluate';                                with ':denotation'             }
     replace_lines { like 'def safeevaluate(\(\*[a-z]+\))';               with 'def denotation\1'        }
     #
@@ -117,12 +117,17 @@ commit "Expressions denote values, computation is just a means to this end" do
     #
     replace_terms { like 'evaluate(\(@?[a-z]*scope\))';                  with 'compute_denotation\1'    }
     replace_terms { like 'evaluate( @?scope)';                           with 'compute_denotation\1'    }
+    replace_terms { like 'respond_to\?\(:evaluate\)';                    with 'respond_to?(:denotation)'}
     replace       { like ':evaluate(\)\.with\(@?scope\))';               with ':compute_denotation\1'   }
     replace_in 'lib/puppet/parser/expression.rb',{
         'def evaluate(*options)' => 'def comute_denotation(*options)',
         'Did not override #evaluate in' => 'Did not override #compute_denotation in',
         'The version of the evaluate method that should be called, because it' => 'Acceses the expressions denotation via a wrapper that memoizes and',
         'return self.evaluate(*options)' => 'compute_denotation(*options)'
+    }
+    replace_terms {
+        like 'obj.evaluate config.topscope'
+        with 'obj.denotation config.topscope'
     }
 end
 
@@ -234,13 +239,31 @@ commit "Expression denotations should not depend on scope" do
     # Puppet::Parser::Expression::_____.new
     #
     replace { 
-        like '(?:Puppet::Parser::Expression|ast)::([A-Z][A-Za-z_]+)\.new([( ]):(?!scope)'
+        like '(?:Puppet::Parser::Expression|ast)::([A-Z][A-Za-z_]+)\.new([( ]) *:(?!scope)'
         with 'Puppet::Parser::Expression::\1.new\2:scope => ((@scope)), :'
+    }
+    replace { 
+        like 'Expression::([A-Z][A-Za-z_]+)\.new([( ]) *:(?!scope)'
+        with 'Expression::\1.new\2:scope => ((scope)), :'
+    }
+    replace_consequtive_lines { 
+        like %q{
+           (.*)Expression::([A-Z][A-Za-z_]+)\.new\(
+        }
+        with %q{
+            \1Expression::\2.new(
+              :scope => ((scope)),
+        }
     }
     replace {
         like '@params = ast::ArrayConstructor.new\(\{\}\)'
         with '@params = Puppet::Parser::Expression::ArrayConstructor.new(:scope => ((@scope)))'
     }
+    replace {
+        like '@class\.new\((.*), (.*), (\'[-~><]{2}\')\)'
+        with '@class.new(\1, \2, \3, :scope => ((@scope)))'
+    }
+    run "patch -p 1 < fix_casestatement_test.patch"
     #
     # Add a stub incarnate
     #
@@ -263,6 +286,15 @@ commit "Expression denotations should not depend on scope" do
         
           # Yield each contained Expression node in turn.  Used mostly by incarnate.
           # This definition means that we don't have to override incarnate
+        }
+    }
+    replace_consequtive_lines {
+        like %q{
+            code = stub 'code'
+        }
+        with %q{
+            code = stub 'code'
+            code.stubs(:incarnate).returns code
         }
     }
 end
